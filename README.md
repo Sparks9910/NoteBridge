@@ -3,6 +3,22 @@
 > 智能简谱转五线谱与音频播放软件开发大纲（参考对标：来音制谱）  
 > 核心聚焦：简谱录入 → 自动转译五线谱 → 实时音频播放与同步对照
 
+## 基本使用方式与当前状态
+
+- **当前状态**：处于项目立项与文档初始化阶段，尚未初始化应用源码、构建配置或可运行入口（待核实 / 待后续技术栈选型后补充）。
+- **使用方式**：待源码工程初始化完成后，在此补充安装、启动与测试方式；日常操作与验证方法详见 [RUNBOOK.md](docs/context/RUNBOOK.md)。
+
+## 文档入口
+
+- **项目规则与读写规范**：[AGENTS.md](AGENTS.md)
+- **任务路由索引**：[PROJECT_INDEX.md](PROJECT_INDEX.md)
+- **当前进展与下一步**：[docs/context/NOW.md](docs/context/NOW.md)
+- **结构与配置映射**：[docs/context/MAP.md](docs/context/MAP.md)
+- **操作与验证手册**：[docs/context/RUNBOOK.md](docs/context/RUNBOOK.md)
+- **已确认决策**：[docs/context/DECISIONS.md](docs/context/DECISIONS.md)
+- **风险与验证缺口**：[docs/context/RISKS.md](docs/context/RISKS.md)
+- **历史记录索引**：[docs/context/history/README.md](docs/context/history/README.md)
+
 ---
 
 ## 一、产品定位与核心目标
