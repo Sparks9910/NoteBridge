@@ -2,6 +2,7 @@ import * as Tone from 'tone';
 import { SplendidGrandPiano } from 'smplr';
 import { createAppError } from '../domain/state-machines.ts';
 import type { Result } from '../domain/types.ts';
+import type { InstrumentId } from '../domain/v2-types.ts';
 import { appConfig } from './config.ts';
 
 export interface ScheduledNote {
@@ -23,6 +24,7 @@ export type AudioBackendMode = 'soundfont' | 'synth-fallback' | 'mock';
 export interface AudioEngine {
   readonly lookaheadMs: number;
   getBackendMode(): AudioBackendMode;
+  setInstrument?(instrumentId: InstrumentId): void;
   unlock(): Promise<Result<void>>;
   loadInstrument(): Promise<Result<AudioBackendMode>>;
   getCurrentTimeMs(): number;
@@ -78,9 +80,22 @@ export class WebAudioEngine implements AudioEngine {
   private readonly pianoFactory?: WebAudioEngineOptions['pianoFactory'];
 
   private mode: AudioBackendMode = 'synth-fallback';
+  private currentInstrumentId: InstrumentId = 'piano';
   private piano: PianoLike | null = null;
   private synth: Tone.PolySynth | null = null;
   private metronomeSynth: Tone.MembraneSynth | null = null;
+  private guitarCleanSynth: Tone.PolySynth | null = null;
+  private guitarCleanFilter: Tone.Filter | null = null;
+  private guitarCleanChorus: Tone.Chorus | null = null;
+  private guitarCleanGain: Tone.Gain | null = null;
+  private guitarOdSynth: Tone.PolySynth | null = null;
+  private guitarOdDistortion: Tone.Distortion | null = null;
+  private guitarOdCabinet: Tone.Filter | null = null;
+  private guitarOdGain: Tone.Gain | null = null;
+  private acousticGuitarSynth: Tone.PolySynth | null = null;
+  private acousticGuitarFilter: Tone.Filter | null = null;
+  private bassSynth: Tone.PolySynth | null = null;
+  private bassFilter: Tone.Filter | null = null;
   private scheduledTimers: number[] = [];
 
   constructor(options?: WebAudioEngineOptions) {
@@ -92,6 +107,10 @@ export class WebAudioEngine implements AudioEngine {
 
   public getBackendMode(): AudioBackendMode {
     return this.mode;
+  }
+
+  public setInstrument(instrumentId: InstrumentId): void {
+    this.currentInstrumentId = instrumentId;
   }
 
   public async unlock(): Promise<Result<void>> {
@@ -172,19 +191,7 @@ export class WebAudioEngine implements AudioEngine {
         const startSec = baseSec + msToSeconds(note.startTimeMs);
         const durSec = Math.max(0.05, msToSeconds(note.durationMs));
         const velocity = note.velocity ?? 0.85;
-
-        if (this.piano && this.mode === 'soundfont') {
-          this.piano.start({
-            note: note.midiPitch,
-            time: startSec,
-            duration: durSec,
-            velocity: Math.round(velocity * 127),
-          });
-        } else {
-          const synth = this.ensureSynth();
-          const noteName = Tone.Frequency(note.midiPitch, 'midi').toNote();
-          synth.triggerAttackRelease(noteName, durSec, startSec, velocity);
-        }
+        this.triggerInstrumentNote(note.midiPitch, durSec, startSec, velocity);
       }
       return { ok: true, value: undefined };
     } catch {
@@ -229,18 +236,7 @@ export class WebAudioEngine implements AudioEngine {
     try {
       const nowSec = Tone.now();
       const durSec = Math.max(0.05, msToSeconds(durationMs));
-      if (this.piano && this.mode === 'soundfont') {
-        this.piano.start({
-          note: midiPitch,
-          time: nowSec,
-          duration: durSec,
-          velocity: 100,
-        });
-      } else {
-        const synth = this.ensureSynth();
-        const noteName = Tone.Frequency(midiPitch, 'midi').toNote();
-        synth.triggerAttackRelease(noteName, durSec, nowSec, 0.8);
-      }
+      this.triggerInstrumentNote(midiPitch, durSec, nowSec, 0.8);
       return { ok: true, value: undefined };
     } catch {
       return {
@@ -261,6 +257,10 @@ export class WebAudioEngine implements AudioEngine {
     try {
       this.piano?.stop?.();
       this.synth?.releaseAll();
+      this.guitarCleanSynth?.releaseAll();
+      this.guitarOdSynth?.releaseAll();
+      this.acousticGuitarSynth?.releaseAll();
+      this.bassSynth?.releaseAll();
     } catch {
       // 忽略停止阶段的浏览器音频上下文未就绪异常
     }
@@ -272,12 +272,177 @@ export class WebAudioEngine implements AudioEngine {
       this.piano?.disconnect?.();
       this.synth?.dispose();
       this.metronomeSynth?.dispose();
+      this.guitarCleanSynth?.dispose();
+      this.guitarCleanFilter?.dispose();
+      this.guitarCleanChorus?.dispose();
+      this.guitarCleanGain?.dispose();
+      this.guitarOdSynth?.dispose();
+      this.guitarOdDistortion?.dispose();
+      this.guitarOdCabinet?.dispose();
+      this.guitarOdGain?.dispose();
+      this.acousticGuitarSynth?.dispose();
+      this.acousticGuitarFilter?.dispose();
+      this.bassSynth?.dispose();
+      this.bassFilter?.dispose();
     } catch {
       // 忽略释放阶段非致命异常
     }
     this.piano = null;
     this.synth = null;
     this.metronomeSynth = null;
+    this.guitarCleanSynth = null;
+    this.guitarCleanFilter = null;
+    this.guitarCleanChorus = null;
+    this.guitarCleanGain = null;
+    this.guitarOdSynth = null;
+    this.guitarOdDistortion = null;
+    this.guitarOdCabinet = null;
+    this.guitarOdGain = null;
+    this.acousticGuitarSynth = null;
+    this.acousticGuitarFilter = null;
+    this.bassSynth = null;
+    this.bassFilter = null;
+  }
+
+  private triggerInstrumentNote(
+    midiPitch: number,
+    durSec: number,
+    startSec: number,
+    velocity: number
+  ): void {
+    const noteName = Tone.Frequency(midiPitch, 'midi').toNote();
+    if (this.currentInstrumentId === 'electric-guitar-clean') {
+      this.ensureGuitarCleanSynth().triggerAttackRelease(
+        noteName,
+        durSec,
+        startSec,
+        velocity
+      );
+      return;
+    }
+    if (this.currentInstrumentId === 'electric-guitar-od') {
+      this.ensureGuitarOdSynth().triggerAttackRelease(
+        noteName,
+        durSec,
+        startSec,
+        velocity
+      );
+      return;
+    }
+    if (this.currentInstrumentId === 'acoustic-guitar') {
+      this.ensureAcousticGuitarSynth().triggerAttackRelease(
+        noteName,
+        durSec,
+        startSec,
+        velocity
+      );
+      return;
+    }
+    if (this.currentInstrumentId === 'bass') {
+      this.ensureBassSynth().triggerAttackRelease(
+        noteName,
+        durSec,
+        startSec,
+        velocity
+      );
+      return;
+    }
+    if (
+      this.currentInstrumentId === 'piano' &&
+      this.piano &&
+      this.mode === 'soundfont'
+    ) {
+      this.piano.start({
+        note: midiPitch,
+        time: startSec,
+        duration: durSec,
+        velocity: Math.round(velocity * 127),
+      });
+      return;
+    }
+    this.ensureSynth().triggerAttackRelease(
+      noteName,
+      durSec,
+      startSec,
+      velocity
+    );
+  }
+
+  private ensureGuitarCleanSynth(): Tone.PolySynth {
+    if (!this.guitarCleanSynth) {
+      this.guitarCleanGain = new Tone.Gain(0.75).toDestination();
+      this.guitarCleanChorus = new Tone.Chorus(2.2, 1.8, 0.25)
+        .connect(this.guitarCleanGain)
+        .start();
+      this.guitarCleanFilter = new Tone.Filter(3600, 'lowpass', -12).connect(
+        this.guitarCleanChorus
+      );
+      this.guitarCleanSynth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: 'triangle8' },
+        envelope: {
+          attack: 0.005,
+          decay: 0.35,
+          sustain: 0.25,
+          release: 0.5,
+        },
+      }).connect(this.guitarCleanFilter);
+    }
+    return this.guitarCleanSynth;
+  }
+
+  private ensureGuitarOdSynth(): Tone.PolySynth {
+    if (!this.guitarOdSynth) {
+      this.guitarOdGain = new Tone.Gain(0.55).toDestination();
+      this.guitarOdCabinet = new Tone.Filter(2200, 'lowpass', -24).connect(
+        this.guitarOdGain
+      );
+      this.guitarOdDistortion = new Tone.Distortion({
+        distortion: 0.65,
+        oversample: '2x',
+      }).connect(this.guitarOdCabinet);
+      this.guitarOdSynth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: 'sawtooth' },
+        envelope: {
+          attack: 0.004,
+          decay: 0.25,
+          sustain: 0.45,
+          release: 0.35,
+        },
+      }).connect(this.guitarOdDistortion);
+    }
+    return this.guitarOdSynth;
+  }
+
+  private ensureAcousticGuitarSynth(): Tone.PolySynth {
+    if (!this.acousticGuitarSynth) {
+      this.acousticGuitarFilter = new Tone.Filter(2800, 'lowpass', -12).toDestination();
+      this.acousticGuitarSynth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: 'fatsawtooth', count: 2, spread: 8 },
+        envelope: {
+          attack: 0.004,
+          decay: 0.45,
+          sustain: 0.12,
+          release: 0.55,
+        },
+      }).connect(this.acousticGuitarFilter);
+    }
+    return this.acousticGuitarSynth;
+  }
+
+  private ensureBassSynth(): Tone.PolySynth {
+    if (!this.bassSynth) {
+      this.bassFilter = new Tone.Filter(950, 'lowpass', -24).toDestination();
+      this.bassSynth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: 'fmsawtooth' },
+        envelope: {
+          attack: 0.006,
+          decay: 0.3,
+          sustain: 0.4,
+          release: 0.35,
+        },
+      }).connect(this.bassFilter);
+    }
+    return this.bassSynth;
   }
 
   private ensureSynth(): Tone.PolySynth {
@@ -324,6 +489,7 @@ export class MockAudioEngine implements AudioEngine {
   public scheduledNotes: ScheduledNote[] = [];
   public scheduledMetronomeTicks: ScheduledMetronomeTick[] = [];
   public previewedNotes: Array<{ midiPitch: number; durationMs: number }> = [];
+  public currentInstrumentId: InstrumentId = 'piano';
   private currentTimeMs = 0;
 
   constructor(options?: MockAudioEngineOptions) {
@@ -334,6 +500,10 @@ export class MockAudioEngine implements AudioEngine {
 
   public getBackendMode(): AudioBackendMode {
     return 'mock';
+  }
+
+  public setInstrument(instrumentId: InstrumentId): void {
+    this.currentInstrumentId = instrumentId;
   }
 
   public async unlock(): Promise<Result<void>> {

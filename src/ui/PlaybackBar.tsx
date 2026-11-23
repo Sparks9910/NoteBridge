@@ -17,6 +17,8 @@ export function PlaybackBar() {
   const loop = usePlaybackStore((s) => s.loop);
   const metronomeEnabled = usePlaybackStore((s) => s.metronomeEnabled);
   const startMeasureIndex = usePlaybackStore((s) => s.startMeasureIndex);
+  const currentBpm = usePlaybackStore((s) => s.currentBpm);
+  const activeSpeedPercent = usePlaybackStore((s) => s.activeSpeedPercent);
   const lastError = usePlaybackStore((s) => s.lastError);
 
   const canStop =
@@ -34,7 +36,7 @@ export function PlaybackBar() {
             data-testid="btn-play"
             disabled={playbackState === 'LOADING_AUDIO'}
             onClick={() => {
-              void playbackController.play({ startMeasureIndex: 0 });
+              void playbackController.play();
             }}
           >
             {playbackState === 'LOADING_AUDIO' ? '加载音源中...' : '播放'}
@@ -102,6 +104,9 @@ export function PlaybackBar() {
           {PLAYBACK_STATUS_LABELS[playbackState]}
           {playbackState === 'PLAYING' && startMeasureIndex > 0
             ? `（第 ${startMeasureIndex + 1} 小节起）`
+            : ''}
+          {playbackState === 'PLAYING' && activeSpeedPercent !== 100
+            ? ` · ${activeSpeedPercent}% (${currentBpm} BPM)`
             : ''}
         </span>
       </div>

@@ -2,6 +2,7 @@ import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import {
   getBeatTicks,
+  getMeasureCapacityTicks,
   msToTicks,
   ticksToMs,
 } from '../domain/rhythm.ts';
@@ -17,6 +18,7 @@ import type {
   PlaybackState,
   Result,
 } from '../domain/types.ts';
+import type { InstrumentId } from '../domain/v2-types.ts';
 import {
   type AudioBackendMode,
   type AudioEngine,
@@ -26,6 +28,11 @@ import {
 } from '../infrastructure/audio-engine.ts';
 import { type InputStoreApi, inputStore } from './input-store.ts';
 import { type NotationStoreApi, notationStore } from './notation-store.ts';
+import {
+  createPracticeStore,
+  type PracticeStoreApi,
+  practiceStore,
+} from './practice-store.ts';
 import { type ScoreStoreApi, scoreStore } from './score-store.ts';
 
 export interface PlaybackSnapshot {
@@ -35,6 +42,9 @@ export interface PlaybackSnapshot {
   startMeasureIndex: number;
   currentBpm: number;
   audioBackendMode: AudioBackendMode;
+  currentInstrumentId: InstrumentId;
+  activeSpeedPercent: number;
+  isCountingIn: boolean;
   lastError: AppError | null;
 }
 
@@ -42,6 +52,7 @@ export interface PlaybackControllerDeps {
   scoreStore?: ScoreStoreApi;
   inputStore?: InputStoreApi;
   notationStore?: NotationStoreApi;
+  practiceStore?: PracticeStoreApi;
   audioEngine?: AudioEngine;
 }
 
@@ -49,6 +60,7 @@ export class PlaybackController {
   private readonly scoreStore: ScoreStoreApi;
   private readonly inputStore: InputStoreApi;
   private readonly notationStore: NotationStoreApi;
+  private readonly practiceStore: PracticeStoreApi;
   private readonly audioEngine: AudioEngine;
   private readonly store: StoreApi<PlaybackSnapshot>;
 
@@ -56,7 +68,11 @@ export class PlaybackController {
   private anchorEngineTimeMs = 0;
   private pausedScoreTick = 0;
   private startMeasureTick = 0;
+  private endScoreTick = 0;
   private totalScoreTicks = 0;
+  private countInDurationMs = 0;
+  private countInBeatDurationMs = 0;
+  private countInBeats = 0;
   private playSessionId = 0;
   private completionTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -64,7 +80,11 @@ export class PlaybackController {
     this.scoreStore = deps?.scoreStore ?? scoreStore;
     this.inputStore = deps?.inputStore ?? inputStore;
     this.notationStore = deps?.notationStore ?? notationStore;
+    this.practiceStore = deps?.practiceStore ?? createPracticeStore();
     this.audioEngine = deps?.audioEngine ?? new WebAudioEngine();
+
+    const initialInstrument = this.practiceStore.getState().selectedInstrumentId;
+    this.audioEngine.setInstrument?.(initialInstrument);
 
     this.store = createStore<PlaybackSnapshot>(() => ({
       playbackState: 'IDLE',
@@ -73,6 +93,9 @@ export class PlaybackController {
       startMeasureIndex: 0,
       currentBpm: this.scoreStore.getState().document.bpm,
       audioBackendMode: this.audioEngine.getBackendMode(),
+      currentInstrumentId: initialInstrument,
+      activeSpeedPercent: 100,
+      isCountingIn: false,
       lastError: null,
     }));
   }
@@ -85,6 +108,33 @@ export class PlaybackController {
     return this.store.getState();
   }
 
+  public setInstrument(instrumentId: InstrumentId): void {
+    this.audioEngine.setInstrument?.(instrumentId);
+    this.store.setState({ currentInstrumentId: instrumentId });
+  }
+
+  public getCountInBeat(): number | null {
+    const snap = this.store.getState();
+    if (
+      snap.playbackState !== 'PLAYING' ||
+      this.countInDurationMs <= 0 ||
+      this.countInBeatDurationMs <= 0
+    ) {
+      return null;
+    }
+    const elapsedMs = Math.max(
+      0,
+      this.audioEngine.getCurrentTimeMs() - this.anchorEngineTimeMs
+    );
+    if (elapsedMs >= this.countInDurationMs) {
+      return null;
+    }
+    return Math.min(
+      this.countInBeats,
+      Math.floor(elapsedMs / this.countInBeatDurationMs) + 1
+    );
+  }
+
   public getCurrentScoreTick(): number {
     const snap = this.store.getState();
     if (snap.playbackState === 'PLAYING') {
@@ -92,20 +142,28 @@ export class PlaybackController {
         0,
         this.audioEngine.getCurrentTimeMs() - this.anchorEngineTimeMs
       );
+      if (this.countInDurationMs > 0 && elapsedMs < this.countInDurationMs) {
+        return this.startMeasureTick;
+      }
+      const effectiveElapsedMs = Math.max(0, elapsedMs - this.countInDurationMs);
       const rawTick =
-        this.anchorScoreTick + msToTicks(elapsedMs, snap.currentBpm);
-      if (this.totalScoreTicks <= 0) {
+        this.anchorScoreTick + msToTicks(effectiveElapsedMs, snap.currentBpm);
+      const endBound =
+        this.endScoreTick > 0 ? this.endScoreTick : this.totalScoreTicks;
+      if (endBound <= 0) {
         return 0;
       }
-      if (snap.loop) {
-        const span = this.totalScoreTicks - this.startMeasureTick;
+      const effectiveLoop =
+        snap.loop || this.practiceStore.getState().abLoopEnabled;
+      if (effectiveLoop) {
+        const span = endBound - this.startMeasureTick;
         if (span <= 0) {
           return this.startMeasureTick;
         }
         const offset = Math.max(0, rawTick - this.startMeasureTick) % span;
         return this.startMeasureTick + offset;
       }
-      return Math.min(this.totalScoreTicks, Math.max(0, rawTick));
+      return Math.min(endBound, Math.max(0, rawTick));
     }
     if (snap.playbackState === 'PAUSED') {
       return this.pausedScoreTick;
@@ -127,7 +185,11 @@ export class PlaybackController {
   }): Promise<Result<PlaybackState>> {
     const snap = this.store.getState();
     const doc = this.scoreStore.getState().document;
-    const targetMeasureIdx = options?.startMeasureIndex ?? 0;
+    const pState = this.practiceStore.getState();
+    const defaultStartIdx = pState.abLoopEnabled
+      ? Math.max(0, Math.min(doc.measures.length - 1, pState.loopStartMeasure))
+      : 0;
+    const targetMeasureIdx = options?.startMeasureIndex ?? defaultStartIdx;
 
     if (targetMeasureIdx < 0 || targetMeasureIdx >= doc.measures.length) {
       const err = createAppError(
@@ -150,10 +212,23 @@ export class PlaybackController {
     const sessionId = this.playSessionId;
 
     this.inputStore.getState().lockForPlayback();
+    if (pState.speedTrainerEnabled) {
+      this.practiceStore.getState().resetSpeedTrainerRun();
+    }
+    const prePlayState = this.practiceStore.getState();
+    const initialEffectiveBpm = this.computeEffectiveBpm(doc.bpm);
+    const initialPercent = prePlayState.speedTrainerEnabled
+      ? prePlayState.currentSpeedPercent
+      : 100;
+    this.audioEngine.setInstrument?.(prePlayState.selectedInstrumentId);
+
     this.store.setState({
       playbackState: startRes.value,
       startMeasureIndex: targetMeasureIdx,
-      currentBpm: doc.bpm,
+      currentBpm: initialEffectiveBpm,
+      currentInstrumentId: prePlayState.selectedInstrumentId,
+      activeSpeedPercent: initialPercent,
+      isCountingIn: false,
       lastError: null,
     });
 
@@ -170,6 +245,7 @@ export class PlaybackController {
       this.inputStore.getState().unlockFromPlayback();
       this.store.setState({
         playbackState: errRes.ok ? errRes.value : 'ERROR',
+        isCountingIn: false,
         lastError: unlockRes.error,
       });
       return { ok: false, error: unlockRes.error };
@@ -188,6 +264,7 @@ export class PlaybackController {
       this.inputStore.getState().unlockFromPlayback();
       this.store.setState({
         playbackState: errRes.ok ? errRes.value : 'ERROR',
+        isCountingIn: false,
         lastError: loadRes.error,
       });
       return { ok: false, error: loadRes.error };
@@ -196,40 +273,57 @@ export class PlaybackController {
     const readyRes = transitionPlaybackState('LOADING_AUDIO', 'AUDIO_READY');
     if (!readyRes.ok) {
       this.inputStore.getState().unlockFromPlayback();
-      this.store.setState({ lastError: readyRes.error });
+      this.store.setState({ isCountingIn: false, lastError: readyRes.error });
       return readyRes;
     }
 
     const latestDoc = this.scoreStore.getState().document;
-    const { startTick, totalTicks } = this.computeMeasureBounds(
-      targetMeasureIdx
-    );
+    const latestPState = this.practiceStore.getState();
+    const { startTick, endTick, totalTicks } =
+      this.computeMeasureBounds(targetMeasureIdx);
     this.startMeasureTick = startTick;
+    this.endScoreTick = endTick;
     this.totalScoreTicks = totalTicks;
+
+    const effectiveBpm = this.computeEffectiveBpm(latestDoc.bpm);
+    const activePercent = latestPState.speedTrainerEnabled
+      ? latestPState.currentSpeedPercent
+      : 100;
+    this.audioEngine.setInstrument?.(latestPState.selectedInstrumentId);
 
     this.store.setState({
       playbackState: readyRes.value,
-      currentBpm: latestDoc.bpm,
+      currentBpm: effectiveBpm,
       audioBackendMode: loadRes.value,
+      currentInstrumentId: latestPState.selectedInstrumentId,
+      activeSpeedPercent: activePercent,
       lastError: null,
     });
 
-    if (totalTicks <= startTick) {
-      if (!this.store.getState().loop) {
+    if (endTick <= startTick) {
+      const effectiveLoop =
+        this.store.getState().loop || latestPState.abLoopEnabled;
+      if (!effectiveLoop) {
         return this.completePlayback();
       }
+      this.countInDurationMs = 0;
+      this.countInBeatDurationMs = 0;
+      this.countInBeats = 0;
       this.anchorScoreTick = startTick;
       this.anchorEngineTimeMs = this.audioEngine.getCurrentTimeMs();
       return { ok: true, value: 'PLAYING' };
     }
 
-    const schedRes = this.scheduleFromTick(startTick, latestDoc.bpm);
+    const schedRes = this.scheduleFromTick(startTick, effectiveBpm, {
+      withCountIn: latestPState.countInEnabled,
+    });
     if (!schedRes.ok) {
       const errRes = transitionPlaybackState('PLAYING', 'AUDIO_FAILED');
       this.audioEngine.stopAll();
       this.inputStore.getState().unlockFromPlayback();
       this.store.setState({
         playbackState: errRes.ok ? errRes.value : 'ERROR',
+        isCountingIn: false,
         lastError: schedRes.error,
       });
       return schedRes;
@@ -276,11 +370,15 @@ export class PlaybackController {
     }
 
     this.pausedScoreTick = this.getCurrentScoreTick();
+    this.countInDurationMs = 0;
+    this.countInBeatDurationMs = 0;
+    this.countInBeats = 0;
     this.clearCompletionTimer();
     this.audioEngine.stopAll();
 
     this.store.setState({
       playbackState: res.value,
+      isCountingIn: false,
       lastError: null,
     });
     return res;
@@ -295,17 +393,32 @@ export class PlaybackController {
     }
 
     const latestDoc = this.scoreStore.getState().document;
-    const { totalTicks } = this.computeMeasureBounds(snap.startMeasureIndex);
+    const pState = this.practiceStore.getState();
+    const { startTick, endTick, totalTicks } = this.computeMeasureBounds(
+      snap.startMeasureIndex
+    );
+    this.startMeasureTick = startTick;
+    this.endScoreTick = endTick;
     this.totalScoreTicks = totalTicks;
+
+    const effectiveBpm = this.computeEffectiveBpm(latestDoc.bpm);
+    const activePercent = pState.speedTrainerEnabled
+      ? pState.currentSpeedPercent
+      : 100;
+    this.audioEngine.setInstrument?.(pState.selectedInstrumentId);
 
     this.store.setState({
       playbackState: res.value,
-      currentBpm: latestDoc.bpm,
+      currentBpm: effectiveBpm,
+      currentInstrumentId: pState.selectedInstrumentId,
+      activeSpeedPercent: activePercent,
+      isCountingIn: false,
       lastError: null,
     });
 
-    if (totalTicks <= this.pausedScoreTick) {
-      if (!this.store.getState().loop) {
+    if (endTick <= this.pausedScoreTick) {
+      const effectiveLoop = snap.loop || pState.abLoopEnabled;
+      if (!effectiveLoop) {
         return this.completePlayback();
       }
       this.anchorScoreTick = this.startMeasureTick;
@@ -313,13 +426,16 @@ export class PlaybackController {
       return { ok: true, value: 'PLAYING' };
     }
 
-    const schedRes = this.scheduleFromTick(this.pausedScoreTick, latestDoc.bpm);
+    const schedRes = this.scheduleFromTick(this.pausedScoreTick, effectiveBpm, {
+      withCountIn: false,
+    });
     if (!schedRes.ok) {
       const errRes = transitionPlaybackState('PLAYING', 'AUDIO_FAILED');
       this.audioEngine.stopAll();
       this.inputStore.getState().unlockFromPlayback();
       this.store.setState({
         playbackState: errRes.ok ? errRes.value : 'ERROR',
+        isCountingIn: false,
         lastError: schedRes.error,
       });
       return schedRes;
@@ -345,10 +461,15 @@ export class PlaybackController {
     this.audioEngine.stopAll();
     this.anchorScoreTick = 0;
     this.pausedScoreTick = 0;
+    this.countInDurationMs = 0;
+    this.countInBeatDurationMs = 0;
+    this.countInBeats = 0;
     this.inputStore.getState().unlockFromPlayback();
+    this.practiceStore.getState().clearActivePlaybackFrame();
 
     this.store.setState({
       playbackState: res.value,
+      isCountingIn: false,
       lastError: null,
     });
     return res;
@@ -356,8 +477,10 @@ export class PlaybackController {
 
   public completePlayback(): Result<PlaybackState> {
     const snap = this.store.getState();
+    const pState = this.practiceStore.getState();
+    const effectiveLoop = snap.loop || pState.abLoopEnabled;
     const res = transitionPlaybackState(snap.playbackState, 'PLAY_COMPLETE', {
-      loop: snap.loop,
+      loop: effectiveLoop,
     });
     if (!res.ok) {
       this.store.setState({ lastError: res.error });
@@ -366,22 +489,50 @@ export class PlaybackController {
 
     this.clearCompletionTimer();
     this.audioEngine.stopAll();
+    this.countInDurationMs = 0;
+    this.countInBeatDurationMs = 0;
+    this.countInBeats = 0;
 
     if (res.value === 'PLAYING') {
+      if (pState.speedTrainerEnabled) {
+        this.practiceStore.getState().advanceSpeedTrainerLoop();
+      }
+      const nextPState = this.practiceStore.getState();
       const latestDoc = this.scoreStore.getState().document;
-      const { startTick, totalTicks } = this.computeMeasureBounds(
-        snap.startMeasureIndex
-      );
+      const targetStartIdx = nextPState.abLoopEnabled
+        ? Math.max(
+            0,
+            Math.min(latestDoc.measures.length - 1, nextPState.loopStartMeasure)
+          )
+        : snap.startMeasureIndex;
+      const { startTick, endTick, totalTicks } =
+        this.computeMeasureBounds(targetStartIdx);
       this.startMeasureTick = startTick;
+      this.endScoreTick = endTick;
       this.totalScoreTicks = totalTicks;
 
-      if (totalTicks > startTick) {
-        const schedRes = this.scheduleFromTick(startTick, latestDoc.bpm);
+      const effectiveBpm = this.computeEffectiveBpm(latestDoc.bpm);
+      const activePercent = nextPState.speedTrainerEnabled
+        ? nextPState.currentSpeedPercent
+        : 100;
+
+      this.store.setState({
+        startMeasureIndex: targetStartIdx,
+        currentBpm: effectiveBpm,
+        activeSpeedPercent: activePercent,
+        isCountingIn: false,
+      });
+
+      if (endTick > startTick) {
+        const schedRes = this.scheduleFromTick(startTick, effectiveBpm, {
+          withCountIn: false,
+        });
         if (!schedRes.ok) {
           const errRes = transitionPlaybackState('PLAYING', 'AUDIO_FAILED');
           this.inputStore.getState().unlockFromPlayback();
           this.store.setState({
             playbackState: errRes.ok ? errRes.value : 'ERROR',
+            isCountingIn: false,
             lastError: schedRes.error,
           });
           return schedRes;
@@ -393,8 +544,10 @@ export class PlaybackController {
     this.anchorScoreTick = 0;
     this.pausedScoreTick = 0;
     this.inputStore.getState().unlockFromPlayback();
+    this.practiceStore.getState().clearActivePlaybackFrame();
     this.store.setState({
       playbackState: res.value,
+      isCountingIn: false,
       lastError: null,
     });
     return res;
@@ -452,12 +605,15 @@ export class PlaybackController {
       return scoreRes;
     }
 
-    this.store.setState({ currentBpm: bpm, lastError: null });
+    const effectiveBpm = this.computeEffectiveBpm(bpm);
+    this.store.setState({ currentBpm: effectiveBpm, lastError: null });
 
     if (snap.playbackState === 'PLAYING') {
       this.clearCompletionTimer();
       this.audioEngine.stopAll();
-      const schedRes = this.scheduleFromTick(currentTickBefore, bpm);
+      const schedRes = this.scheduleFromTick(currentTickBefore, effectiveBpm, {
+        withCountIn: false,
+      });
       if (!schedRes.ok) {
         return schedRes;
       }
@@ -476,16 +632,80 @@ export class PlaybackController {
     if (!resolved) {
       return { ok: true, value: undefined };
     }
+    return this.previewMidi(resolved.midiPitch, 280);
+  }
+
+  public previewMidi(midiPitch: number, durationMs = 280): Result<void> {
+    const instId = this.practiceStore.getState().selectedInstrumentId;
+    this.audioEngine.setInstrument?.(instId);
 
     if (this.audioEngine.getBackendMode() !== 'mock') {
       void this.audioEngine.unlock();
     }
 
-    const res = this.audioEngine.previewNote(resolved.midiPitch, 280);
+    const res = this.audioEngine.previewNote(midiPitch, durationMs);
     if (!res.ok) {
       this.store.setState({ lastError: res.error });
     }
     return res;
+  }
+
+  public async jumpMeasureBy(delta: -1 | 1): Promise<Result<PlaybackState>> {
+    const doc = this.scoreStore.getState().document;
+    const measureCount = doc.measures.length;
+    if (measureCount <= 0) {
+      return { ok: true, value: this.store.getState().playbackState };
+    }
+
+    const snap = this.store.getState();
+    const pState = this.practiceStore.getState();
+    const currentTick = this.getCurrentScoreTick();
+    let currentMeasureIdx = snap.startMeasureIndex;
+    if (snap.playbackState === 'PLAYING' || snap.playbackState === 'PAUSED') {
+      let running = 0;
+      for (let i = 0; i < doc.measures.length; i += 1) {
+        const mTicks =
+          doc.measures[i]?.notes.reduce((s, n) => s + n.durationTicks, 0) ?? 0;
+        if (currentTick >= running && currentTick < running + mTicks) {
+          currentMeasureIdx = i;
+          break;
+        }
+        running += mTicks;
+      }
+    } else {
+      currentMeasureIdx = pState.activeMeasureIndex;
+    }
+
+    const minIdx = pState.abLoopEnabled
+      ? Math.max(0, Math.min(measureCount - 1, pState.loopStartMeasure))
+      : 0;
+    const maxIdx = pState.abLoopEnabled
+      ? Math.max(minIdx, Math.min(measureCount - 1, pState.loopEndMeasure))
+      : measureCount - 1;
+
+    const targetIdx = Math.max(minIdx, Math.min(maxIdx, currentMeasureIdx + delta));
+    if (
+      snap.playbackState === 'PLAYING' ||
+      snap.playbackState === 'PAUSED' ||
+      snap.playbackState === 'LOADING_AUDIO'
+    ) {
+      return this.playFromMeasure(targetIdx);
+    }
+
+    this.practiceStore.getState().setActivePlaybackFrame({
+      activeMeasureIndex: targetIdx,
+    });
+    this.store.setState({ startMeasureIndex: targetIdx });
+    return { ok: true, value: snap.playbackState };
+  }
+
+  public async restartFromLoopStart(): Promise<Result<PlaybackState>> {
+    const doc = this.scoreStore.getState().document;
+    const pState = this.practiceStore.getState();
+    const targetIdx = pState.abLoopEnabled
+      ? Math.max(0, Math.min(doc.measures.length - 1, pState.loopStartMeasure))
+      : 0;
+    return this.playFromMeasure(targetIdx);
   }
 
   public dispose(): void {
@@ -501,15 +721,32 @@ export class PlaybackController {
     }
   }
 
+  private computeEffectiveBpm(baseBpm: number): number {
+    const pState = this.practiceStore.getState();
+    const percent = pState.speedTrainerEnabled ? pState.currentSpeedPercent : 100;
+    return Math.max(24, Math.min(240, Math.round((baseBpm * percent) / 100)));
+  }
+
   private computeMeasureBounds(startMeasureIndex: number): {
     startTick: number;
+    endTick: number;
     totalTicks: number;
   } {
     const doc = this.scoreStore.getState().document;
+    const pState = this.practiceStore.getState();
+    const measureCount = doc.measures.length;
+    const clampedEndMeasure = pState.abLoopEnabled
+      ? Math.max(
+          startMeasureIndex,
+          Math.min(measureCount - 1, pState.loopEndMeasure)
+        )
+      : Math.max(0, measureCount - 1);
+
     let runningTick = 0;
     let startTick = 0;
+    let endTick = 0;
 
-    for (let i = 0; i < doc.measures.length; i += 1) {
+    for (let i = 0; i < measureCount; i += 1) {
       if (i === startMeasureIndex) {
         startTick = runningTick;
       }
@@ -519,40 +756,76 @@ export class PlaybackController {
           runningTick += note.durationTicks;
         }
       }
+      if (i === clampedEndMeasure) {
+        endTick = runningTick;
+      }
+    }
+
+    if (endTick === 0 && !pState.abLoopEnabled) {
+      endTick = runningTick;
     }
 
     return {
       startTick,
+      endTick,
       totalTicks: runningTick,
     };
   }
 
-  private scheduleFromTick(fromTick: number, bpm: number): Result<void> {
+  private scheduleFromTick(
+    fromTick: number,
+    bpm: number,
+    options?: { withCountIn?: boolean }
+  ): Result<void> {
     const doc = this.scoreStore.getState().document;
+    const pState = this.practiceStore.getState();
     const resolvedNotes = resolveScoreNotes(doc);
+    const endTick =
+      this.endScoreTick > 0 ? this.endScoreTick : this.totalScoreTicks;
+
+    let countInBeats = 0;
+    let countInBeatDurationMs = 0;
+    let countInDurationMs = 0;
+    if (options?.withCountIn) {
+      const beatTicks = getBeatTicks(doc.timeSignature);
+      const measureTicks = getMeasureCapacityTicks(doc.timeSignature);
+      countInBeats = Math.max(1, Math.round(measureTicks / beatTicks));
+      countInBeatDurationMs = ticksToMs(beatTicks, bpm);
+      countInDurationMs = countInBeats * countInBeatDurationMs;
+    }
+    this.countInBeats = countInBeats;
+    this.countInBeatDurationMs = countInBeatDurationMs;
+    this.countInDurationMs = countInDurationMs;
+    this.store.setState({ isCountingIn: countInDurationMs > 0 });
 
     const scheduledNotes: ScheduledNote[] = [];
-    for (const rn of resolvedNotes) {
-      if (rn.midiPitch === null) {
-        continue;
+    if (!pState.muteRightHand) {
+      for (const rn of resolvedNotes) {
+        if (rn.midiPitch === null) {
+          continue;
+        }
+        const noteEndTick = Math.min(
+          rn.startTickInScore + rn.durationTicks,
+          endTick
+        );
+        if (noteEndTick <= fromTick || rn.startTickInScore >= endTick) {
+          continue;
+        }
+        const effectiveStartTick = Math.max(fromTick, rn.startTickInScore);
+        const remainingTicks = noteEndTick - effectiveStartTick;
+        scheduledNotes.push({
+          noteId: rn.noteId,
+          midiPitch: rn.midiPitch,
+          startTimeMs:
+            countInDurationMs + ticksToMs(effectiveStartTick - fromTick, bpm),
+          durationMs: ticksToMs(remainingTicks, bpm),
+        });
       }
-      const noteEndTick = rn.startTickInScore + rn.durationTicks;
-      if (noteEndTick <= fromTick) {
-        continue;
-      }
-      const effectiveStartTick = Math.max(fromTick, rn.startTickInScore);
-      const remainingTicks = noteEndTick - effectiveStartTick;
-      scheduledNotes.push({
-        noteId: rn.noteId,
-        midiPitch: rn.midiPitch,
-        startTimeMs: ticksToMs(effectiveStartTick - fromTick, bpm),
-        durationMs: ticksToMs(remainingTicks, bpm),
-      });
     }
 
     // 并行调度 Voice 2（低音声部 / 钢琴左手）音符，保持时间轴同步
     const nState = this.notationStore.getState();
-    if (nState.boundScoreId === doc.id) {
+    if (!pState.muteLeftHand && nState.boundScoreId === doc.id) {
       const voice2 = nState.tracks[nState.activeTrackIndex]?.voices[1];
       if (voice2) {
         let mStartTick = 0;
@@ -565,20 +838,21 @@ export class PlaybackController {
           if (v2Measure) {
             let v2Tick = mStartTick;
             for (const beat of v2Measure.beats) {
-              const beatEnd = v2Tick + beat.durationTicks;
-              if (!beat.isRest && beatEnd > fromTick) {
+              const beatEnd = Math.min(v2Tick + beat.durationTicks, endTick);
+              if (!beat.isRest && beatEnd > fromTick && v2Tick < endTick) {
                 const effStart = Math.max(fromTick, v2Tick);
                 const remTicks = beatEnd - effStart;
                 for (const pNode of beat.notes) {
                   scheduledNotes.push({
                     noteId: beat.id,
                     midiPitch: pNode.midiPitch,
-                    startTimeMs: ticksToMs(effStart - fromTick, bpm),
+                    startTimeMs:
+                      countInDurationMs + ticksToMs(effStart - fromTick, bpm),
                     durationMs: ticksToMs(remTicks, bpm),
                   });
                 }
               }
-              v2Tick = beatEnd;
+              v2Tick += beat.durationTicks;
             }
           }
           mStartTick += v1Ticks;
@@ -591,11 +865,23 @@ export class PlaybackController {
       return noteRes;
     }
 
+    const metroTicks: ScheduledMetronomeTick[] = [];
+    let tickIdx = 0;
+
+    if (countInBeats > 0) {
+      for (let i = 0; i < countInBeats; i += 1) {
+        metroTicks.push({
+          tickIndex: tickIdx,
+          timeMs: i * countInBeatDurationMs,
+          isAccent: i === 0,
+        });
+        tickIdx += 1;
+      }
+    }
+
     if (this.store.getState().metronomeEnabled) {
       const beatTicks = getBeatTicks(doc.timeSignature);
-      const metroTicks: ScheduledMetronomeTick[] = [];
       let measureStart = 0;
-      let tickIdx = 0;
 
       for (const measure of doc.measures) {
         let measureDuration = 0;
@@ -606,13 +892,13 @@ export class PlaybackController {
         let beatPos = 0;
         for (
           let tick = measureStart;
-          tick < measureEnd;
+          tick < measureEnd && tick < endTick;
           tick += beatTicks
         ) {
           if (tick >= fromTick) {
             metroTicks.push({
               tickIndex: tickIdx,
-              timeMs: ticksToMs(tick - fromTick, bpm),
+              timeMs: countInDurationMs + ticksToMs(tick - fromTick, bpm),
               isAccent: beatPos === 0,
             });
             tickIdx += 1;
@@ -621,22 +907,26 @@ export class PlaybackController {
         }
         measureStart = measureEnd;
       }
+    }
 
-      if (metroTicks.length > 0) {
-        const metroRes = this.audioEngine.scheduleMetronome(metroTicks);
-        if (!metroRes.ok) {
-          return metroRes;
-        }
+    if (metroTicks.length > 0) {
+      const metroRes = this.audioEngine.scheduleMetronome(metroTicks);
+      if (!metroRes.ok) {
+        return metroRes;
       }
     }
 
     this.anchorScoreTick = fromTick;
     this.anchorEngineTimeMs = this.audioEngine.getCurrentTimeMs();
 
-    const remainingTotalTicks = Math.max(0, this.totalScoreTicks - fromTick);
+    const remainingBoundTicks = Math.max(0, endTick - fromTick);
     const delayMs = Math.max(
       20,
-      Math.ceil(ticksToMs(remainingTotalTicks, bpm) + this.audioEngine.lookaheadMs)
+      Math.ceil(
+        countInDurationMs +
+          ticksToMs(remainingBoundTicks, bpm) +
+          this.audioEngine.lookaheadMs
+      )
     );
     this.completionTimer = globalThis.setTimeout(() => {
       this.completionTimer = null;
@@ -653,8 +943,9 @@ export function createPlaybackController(
   return new PlaybackController(deps);
 }
 
-export const playbackController: PlaybackController =
-  createPlaybackController();
+export const playbackController: PlaybackController = createPlaybackController({
+  practiceStore,
+});
 
 export function usePlaybackStore<T>(
   selector: (state: PlaybackSnapshot) => T,

@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
+  practiceStore,
+  usePracticeStore,
+} from '../application/practice-store.ts';
+import {
   KEY_SIGNATURE_OPTIONS,
   scoreStore,
   useScoreStore,
@@ -17,6 +21,7 @@ export interface TransposeModalProps {
 
 export function TransposeModal({ isOpen, onClose }: TransposeModalProps) {
   const currentKey = useScoreStore((s) => s.document.keySignature);
+  const capo = usePracticeStore((s) => s.capo);
   const [strategy, setStrategy] = useState<TransposeStrategy>('movable-do');
   const [targetKey, setTargetKey] = useState<KeySignature>(currentKey);
   const [semitones, setSemitones] = useState<number>(0);
@@ -167,6 +172,29 @@ export function TransposeModal({ isOpen, onClose }: TransposeModalProps) {
               </div>
             </div>
           )}
+
+          <div className="nb-modal-section">
+            <label className="nb-field">
+              <span className="nb-modal-label">吉他变调夹快捷联动（不改原谱，不标脏）</span>
+              <select
+                className="nb-select"
+                data-testid="transpose-capo-select"
+                value={capo}
+                onChange={(e) =>
+                  practiceStore.getState().setCapo(Number(e.target.value))
+                }
+              >
+                {Array.from({ length: 13 }, (_, i) => (
+                  <option key={i} value={i}>
+                    {i === 0 ? '无变调夹 (0品)' : `Capo ${i} 品`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="nb-help-text">
+              提示：应用一键移调后，练谱模式下的吉他六线谱与指板把位将自动按最小把位移动重新计算。
+            </p>
+          </div>
         </div>
 
         <div className="nb-modal-footer">

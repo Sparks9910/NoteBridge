@@ -14,6 +14,7 @@ export interface LayoutOptions {
   paddingTop?: number;
   staffLineHeight?: number;
   jianpuLineHeight?: number;
+  tabLineHeight?: number;
   lineGap?: number;
   isGrandStaff?: boolean;
   hasLyricsOrMarkings?: boolean;
@@ -37,6 +38,7 @@ export interface LayoutLine {
   y: number;
   staffY: number;
   jianpuY: number;
+  tabY: number;
   height: number;
   measures: MeasureLayout[];
 }
@@ -105,6 +107,7 @@ export function computeScoreLayout(
   const jianpuHeight =
     options?.jianpuLineHeight ??
     (options?.hasLyricsOrMarkings ? 96 : DEFAULT_JIANPU_HEIGHT);
+  const tabHeight = Math.max(0, options?.tabLineHeight ?? 0);
   const lineGap = options?.lineGap ?? DEFAULT_LINE_GAP;
   const usableWidth = containerWidth - paddingX * 2;
 
@@ -125,7 +128,7 @@ export function computeScoreLayout(
   let runningTick = 0;
   const totalMeasures = doc.measures.length;
   const lineCount = Math.max(1, Math.ceil(totalMeasures / measuresPerLine));
-  const lineBlockHeight = staffHeight + jianpuHeight + lineGap;
+  const lineBlockHeight = staffHeight + jianpuHeight + tabHeight + lineGap;
 
   for (let lineIdx = 0; lineIdx < lineCount; lineIdx += 1) {
     const startIdx = lineIdx * measuresPerLine;
@@ -146,6 +149,7 @@ export function computeScoreLayout(
     const lineY = paddingTop + lineIdx * lineBlockHeight;
     const staffY = lineY;
     const jianpuY = lineY + staffHeight;
+    const tabY = lineY + staffHeight + jianpuHeight;
 
     const measureLayouts: MeasureLayout[] = [];
     let cursorMeasureX = paddingX;
@@ -223,7 +227,8 @@ export function computeScoreLayout(
       y: lineY,
       staffY,
       jianpuY,
-      height: staffHeight + jianpuHeight,
+      tabY,
+      height: staffHeight + jianpuHeight + tabHeight,
       measures: measureLayouts,
     });
   }

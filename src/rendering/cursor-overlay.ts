@@ -46,11 +46,15 @@ export class CursorOverlayController {
     this.ensureCursorElement();
   }
 
-  public start(getCurrentTimeMs: () => number, bpm: number): void {
+  public start(
+    getCurrentTimeMs: () => number,
+    bpm: number | (() => number)
+  ): void {
     this.stop();
     const tickFrame = () => {
       const timeMs = getCurrentTimeMs();
-      this.updateToTimeMs(timeMs, bpm);
+      const activeBpm = typeof bpm === 'function' ? bpm() : bpm;
+      this.updateToTimeMs(timeMs, activeBpm);
       this.rafId = this.raf(tickFrame);
     };
     this.rafId = this.raf(tickFrame);
@@ -131,7 +135,7 @@ export class CursorOverlayController {
 
     if (activeNoteId) {
       const targets = this.container.querySelectorAll(
-        `[data-note-id="${activeNoteId}"]`
+        `[data-note-id="${activeNoteId}"], [data-tab-note-id="${activeNoteId}"]`
       );
       targets.forEach((node) => {
         node.classList.add('nb-note-active');
