@@ -1,0 +1,57 @@
+NoteBridge（音桥）第 6 步 · L0-L6 全量测试与 P0 MVP 集成验收报告
+========================================================================
+核验日期：2026-11-23
+核验对象：NoteBridge（音桥）P0 MVP 全量代码、L0-L6 自动化测试套件与验收归档
+执行角色：测试与独立集成验收负责人（第 6 步）
+
+一、实测环境表
+------------------------------------------------------------------------
+- 操作系统：Microsoft Windows [Version 10.0.26200.9974]
+- Node.js：v24.15.0
+- npm：11.12.1
+- 浏览器引擎：Google Chrome 158.0.8127.36（Playwright channel: 'chrome', headless: true）
+- 测试框架：Vitest v5.1.1 + Playwright Test v1.65.1
+
+二、全量 10 条验证命令实测结果
+------------------------------------------------------------------------
+1. npm run typecheck      -> 退出码 0 -> 通过（tsc --noEmit 零错误）
+2. npm run build          -> 退出码 0 -> 通过（1121 modules，产物 dist/index.html 0.58 kB、CSS 8.13 kB、JS 1,913.56 kB）
+3. npm run test:config    -> 退出码 0 -> 9 passed / 0 failed / 0 skipped（1 个测试文件）
+4. npm run test:unit      -> 退出码 0 -> 20 passed / 0 failed / 0 skipped（5 个测试文件）
+5. npm run test:service   -> 退出码 0 -> 8 passed / 0 failed / 0 skipped（3 个测试文件）
+6. npm run test:contract  -> 退出码 0 -> 4 passed / 0 failed / 0 skipped（1 个测试文件）
+7. npm run test:e2e:mock  -> 退出码 0 -> 2 passed / 0 failed / 0 skipped（1 个测试文件）
+8. npm run test:nonfunc   -> 退出码 0 -> 4 passed / 0 failed / 0 skipped（1 个测试文件）
+9. npm run test:browser   -> 退出码 0 -> 6 passed / 0 failed / 0 skipped（1 个测试文件，注：因沙盒禁连 127.0.0.1 回环端口，于宿主机网络上下文实测通过）
+10. npm run smoke         -> 退出码 0 -> 5 passed / 0 failed
+
+三、L6 100 小节长谱性能实测指标（500 音符）
+------------------------------------------------------------------------
+- resolveScoreNotes(500 notes)：2.34 ms（阈值 < 500 ms）
+- computeScoreLayout(containerWidth=960)：1.84 ms（阈值 < 500 ms）
+- buildJianpuRenderModel：1.33 ms（阈值 < 500 ms）
+- serializeScoreDocument + deserializeScoreDocument 往返：3.30 ms（阈值 < 500 ms）
+- createScoreStore 批量写入 100 音符 + saveNow()：16.39 ms（阈值 < 1500 ms）
+- 历史栈上限（MAX_HISTORY_SIZE <= 100）、50 次 Undo/Redo、播放期 40 次 40-200 BPM 切换、12 类中文错误提示与 src/ui/* 单向依赖扫描：全部通过
+
+四、L5 无头浏览器双谱 X 坐标对齐实测与截图清单
+------------------------------------------------------------------------
+- 1=G 复杂符号组合（#、高低八度、附点、八分连杠、休止符）：5 个音符实测偏差分别为 0.1px, 0.1px, 0.1px, 0.1px, 0px（均 <= 2px 准出条件）
+- 《小星星》演示曲谱前 8 音符实测偏差分别为 0.1px, 0.1px, 0.1px, 0.1px, 0.1px, 0.1px, 0.1px, 0.21px（均 <= 2px 准出条件）
+- console.error 数量：0；pageerror 数量：0；英文异常/堆栈文本：0
+- 实测截图归档（相对路径）：
+  - docs/evidence/step6-dual-view.png
+  - docs/evidence/step6-overflow-alert.png
+  - docs/evidence/step6-demo-mode.png
+
+五、L7 真机未验收依赖清单
+------------------------------------------------------------------------
+- 真实声卡听觉质量与延迟验收：未验收 + 缺带物理音频输出设备的真机人工听测环境
+- 移动端（iOS / Android）触控与音频解锁：未验收 + 缺 iOS/Android 真实移动测试设备
+- 移动端原生 .sf2 SoundFont 音源集成：未验收 + 缺移动端原生壳工程与授权合规的 .sf2 音源文件
+- 真实生产域名 HTTPS 静态托管：未验收 + 缺生产域名、TLS 证书与托管平台凭据
+- P2 拍照识谱（OMR）外部服务：未验收 + 缺商业 OMR SDK 凭据或 GPU 推理服务环境
+
+六、P0 MVP 集成验收结论
+------------------------------------------------------------------------
+- 结论：NoteBridge（音桥）P0 MVP 已满足 docs/01-范围与边界.md 第四节全部 11 项功能与非功能完成定义，L0-L6 全量自动化测试 100% 通过，无 S1/S2 级未闭环缺陷，达到 P0 MVP 交付准出条件（L7 真机音频主观听测与移动端兼容性按契约列为未验收依赖）。

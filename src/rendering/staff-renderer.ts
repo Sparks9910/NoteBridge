@@ -136,13 +136,21 @@ export function renderStaff(
         const resolved = resolvedMap.get(note.id);
         const staveNote = createVexStaveNote(note, resolved);
 
+        staveNote.setStave(stave).setContext(ctx);
         const tickContext = new TickContext();
         tickContext.addTickable(staveNote);
         tickContext.preFormat();
         tickContext.setX(slot.x - stave.getNoteStartX());
 
-        staveNote.setStave(stave).setContext(ctx);
-        const delta = slot.x - staveNote.getAbsoluteX();
+        const headBegin = staveNote.getNoteHeadBeginX();
+        const headEnd = staveNote.getNoteHeadEndX();
+        const glyphWidth =
+          staveNote.getMetrics().glyphWidth || staveNote.getGlyphWidth() || 11.76;
+        const headCenterX =
+          headEnd > headBegin
+            ? (headBegin + headEnd) / 2
+            : staveNote.getAbsoluteX() + glyphWidth / 2;
+        const delta = slot.x - headCenterX;
         if (Math.abs(delta) > 0.01) {
           tickContext.setX(tickContext.getX() + delta);
         }
