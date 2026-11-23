@@ -32,6 +32,7 @@ import {
   createPracticeStore,
   type PracticeStoreApi,
   practiceStore,
+  resolveTrackAudibility,
 } from './practice-store.ts';
 import { type ScoreStoreApi, scoreStore } from './score-store.ts';
 
@@ -572,6 +573,19 @@ export class PlaybackController {
     this.store.setState({ loop: enabled });
   }
 
+  public refreshMixLive(): Result<void> {
+    const snap = this.store.getState();
+    if (snap.playbackState === 'PLAYING') {
+      const currentTick = this.getCurrentScoreTick();
+      this.clearCompletionTimer();
+      this.audioEngine.stopAll();
+      return this.scheduleFromTick(currentTick, snap.currentBpm, {
+        withCountIn: false,
+      });
+    }
+    return { ok: true, value: undefined };
+  }
+
   public setMetronomeEnabled(enabled: boolean): Result<void> {
     this.store.setState({ metronomeEnabled: enabled });
     const snap = this.store.getState();
@@ -798,8 +812,25 @@ export class PlaybackController {
     this.countInDurationMs = countInDurationMs;
     this.store.setState({ isCountingIn: countInDurationMs > 0 });
 
+    const nState = this.notationStore.getState();
+    const hasBoundNotation = nState.boundScoreId === doc.id && nState.tracks.length > 0;
+    const trackIds = hasBoundNotation
+      ? nState.tracks.map((t) => t.id)
+      : ['track_main'];
+    const audibility = resolveTrackAudibility(trackIds, pState.trackMixByTrackId);
+    const mainTrack = hasBoundNotation ? nState.tracks[0] : undefined;
+    const mainTrackId = mainTrack?.id ?? 'track_main';
+    const mainMix = audibility[mainTrackId] ?? {
+      audible: true,
+      effectiveGain: 1,
+    };
+
     const scheduledNotes: ScheduledNote[] = [];
-    if (!pState.muteRightHand) {
+    if (!pState.muteRightHand && mainMix.audible) {
+      const mainVelocity = Math.max(
+        0.05,
+        Math.min(1, 0.85 * mainMix.effectiveGain)
+      );
       for (const rn of resolvedNotes) {
         if (rn.midiPitch === null) {
           continue;
@@ -819,15 +850,21 @@ export class PlaybackController {
           startTimeMs:
             countInDurationMs + ticksToMs(effectiveStartTick - fromTick, bpm),
           durationMs: ticksToMs(remainingTicks, bpm),
+          velocity: mainVelocity,
+          trackId: mainTrackId,
+          instrumentId: pState.selectedInstrumentId,
         });
       }
     }
 
     // 并行调度 Voice 2（低音声部 / 钢琴左手）音符，保持时间轴同步
-    const nState = this.notationStore.getState();
-    if (!pState.muteLeftHand && nState.boundScoreId === doc.id) {
-      const voice2 = nState.tracks[nState.activeTrackIndex]?.voices[1];
+    if (!pState.muteLeftHand && hasBoundNotation && mainMix.audible) {
+      const voice2 = mainTrack?.voices[1];
       if (voice2) {
+        const v2Velocity = Math.max(
+          0.05,
+          Math.min(1, 0.8 * mainMix.effectiveGain)
+        );
         let mStartTick = 0;
         for (let mIdx = 0; mIdx < doc.measures.length; mIdx += 1) {
           const v1Measure = doc.measures[mIdx];
@@ -849,6 +886,9 @@ export class PlaybackController {
                     startTimeMs:
                       countInDurationMs + ticksToMs(effStart - fromTick, bpm),
                     durationMs: ticksToMs(remTicks, bpm),
+                    velocity: v2Velocity,
+                    trackId: mainTrackId,
+                    instrumentId: pState.selectedInstrumentId,
                   });
                 }
               }
@@ -856,6 +896,60 @@ export class PlaybackController {
             }
           }
           mStartTick += v1Ticks;
+        }
+      }
+    }
+
+    // 并行调度第 2 轨及后续伴奏轨（支持 Guitar Pro / MusicXML 多轨混音 Mute / Solo）
+    if (hasBoundNotation && nState.tracks.length > 1) {
+      const fallbackCapTicks = getMeasureCapacityTicks(doc.timeSignature);
+      const measureStartTicks: number[] = [];
+      let runningMeasureTick = 0;
+      for (let mIdx = 0; mIdx < doc.measures.length; mIdx += 1) {
+        measureStartTicks.push(runningMeasureTick);
+        const mTicks =
+          doc.measures[mIdx]?.notes.reduce((s, n) => s + n.durationTicks, 0) ?? 0;
+        runningMeasureTick += mTicks > 0 ? mTicks : fallbackCapTicks;
+      }
+
+      for (let tIdx = 1; tIdx < nState.tracks.length; tIdx += 1) {
+        const track = nState.tracks[tIdx]!;
+        const mix = audibility[track.id];
+        if (!mix || !mix.audible) {
+          continue;
+        }
+        const trackVelocity = Math.max(
+          0.05,
+          Math.min(1, 0.82 * mix.effectiveGain)
+        );
+        for (const voice of track.voices) {
+          for (let mIdx = 0; mIdx < voice.measures.length; mIdx += 1) {
+            const m = voice.measures[mIdx];
+            if (!m) continue;
+            const mStart =
+              measureStartTicks[mIdx] ?? mIdx * fallbackCapTicks;
+            let bTick = mStart;
+            for (const beat of m.beats) {
+              const beatEnd = Math.min(bTick + beat.durationTicks, endTick);
+              if (!beat.isRest && beatEnd > fromTick && bTick < endTick) {
+                const effStart = Math.max(fromTick, bTick);
+                const remTicks = beatEnd - effStart;
+                for (const pNode of beat.notes) {
+                  scheduledNotes.push({
+                    noteId: `${track.id}:${beat.id}`,
+                    midiPitch: pNode.midiPitch,
+                    startTimeMs:
+                      countInDurationMs + ticksToMs(effStart - fromTick, bpm),
+                    durationMs: ticksToMs(remTicks, bpm),
+                    velocity: trackVelocity,
+                    trackId: track.id,
+                    instrumentId: track.instrumentId,
+                  });
+                }
+              }
+              bTick += beat.durationTicks;
+            }
+          }
         }
       }
     }

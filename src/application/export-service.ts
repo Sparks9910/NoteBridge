@@ -67,6 +67,10 @@ function buildPrintContextFromV2(
             }
           }
           for (const b of m.beats) {
+            const leadGuitar = b.notes[0]?.guitar;
+            const hasGuitarTechs = Boolean(
+              leadGuitar?.techniques && leadGuitar.techniques.length > 0
+            );
             if (
               b.lyric ||
               b.dynamic ||
@@ -75,7 +79,8 @@ function buildPrintContextFromV2(
               b.tieEnd ||
               b.slurStart ||
               b.slurEnd ||
-              b.notes[0]?.fingering
+              b.notes[0]?.fingering ||
+              hasGuitarTechs
             ) {
               noteExtrasById[b.id] = {
                 lyric: b.lyric,
@@ -86,6 +91,9 @@ function buildPrintContextFromV2(
                 tieEnd: b.tieEnd,
                 slurStart: b.slurStart,
                 slurEnd: b.slurEnd,
+                ...(hasGuitarTechs
+                  ? { guitarTechniques: leadGuitar?.techniques }
+                  : {}),
               };
             }
           }

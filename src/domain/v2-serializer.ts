@@ -1,3 +1,4 @@
+import { normalizeGuitarTechniques } from './v2-instruments.ts';
 import {
   calculateDurationTicks,
   VALID_BASE_DURATIONS,
@@ -342,7 +343,17 @@ export function extractPartsFromScoreV2(
           ...m,
           beats: m.beats.map((b) => ({
             ...b,
-            notes: b.notes.map((n) => ({ ...n })),
+            notes: b.notes.map((n) => ({
+              ...n,
+              guitar: n.guitar
+                ? {
+                    ...n.guitar,
+                    techniques: n.guitar.techniques
+                      ? [...n.guitar.techniques]
+                      : undefined,
+                  }
+                : undefined,
+            })),
           })),
         })),
       })),
@@ -414,7 +425,17 @@ export function extractVoiceAsPartV2(
           ...m,
           beats: m.beats.map((b) => ({
             ...b,
-            notes: b.notes.map((n) => ({ ...n })),
+            notes: b.notes.map((n) => ({
+              ...n,
+              guitar: n.guitar
+                ? {
+                    ...n.guitar,
+                    techniques: n.guitar.techniques
+                      ? [...n.guitar.techniques]
+                      : undefined,
+                  }
+                : undefined,
+            })),
           })),
         })),
       },
@@ -481,12 +502,17 @@ function validatePitchNode(raw: unknown, path: string): Result<PitchNode> {
       typeof raw.guitar.fret === 'number' &&
       Number.isInteger(raw.guitar.fret)
     ) {
+      const normalizedTechs = Array.isArray(raw.guitar.techniques)
+        ? normalizeGuitarTechniques(
+            raw.guitar.techniques.filter(
+              (t): t is string => typeof t === 'string'
+            )
+          )
+        : [];
       node.guitar = {
         string: raw.guitar.string,
         fret: raw.guitar.fret,
-        techniques: Array.isArray(raw.guitar.techniques)
-          ? raw.guitar.techniques.filter((t): t is string => typeof t === 'string')
-          : undefined,
+        ...(normalizedTechs.length > 0 ? { techniques: normalizedTechs } : {}),
       };
     }
   }

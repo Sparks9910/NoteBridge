@@ -7,11 +7,22 @@ import {
   TickContext,
 } from 'vexflow';
 import type { BaseDuration, ScoreDocument } from '../domain/types.ts';
-import type { FretboardPosition } from '../domain/v2-instruments.ts';
-import type { MeasureNotationExtra } from '../domain/v2-types.ts';
+import {
+  type FretboardPosition,
+  GUITAR_TECHNIQUE_OPTIONS,
+} from '../domain/v2-instruments.ts';
+import type {
+  GuitarTechnique,
+  MeasureNotationExtra,
+  NoteNotationExtra,
+} from '../domain/v2-types.ts';
 import type { ScoreLayout } from './layout-engine.ts';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+
+const TECH_SYMBOL_MAP: Readonly<Record<GuitarTechnique, string>> = Object.fromEntries(
+  GUITAR_TECHNIQUE_OPTIONS.map((t) => [t.id, t.tabSymbol])
+) as Record<GuitarTechnique, string>;
 
 export interface TabRenderOptions {
   stringCount: number;
@@ -20,6 +31,7 @@ export interface TabRenderOptions {
   activeNoteId?: string | null;
   capo?: number;
   tuningLabel?: string;
+  noteExtrasById?: Readonly<Record<string, NoteNotationExtra>>;
   measureExtrasByIndex?: Readonly<Record<number, MeasureNotationExtra>>;
 }
 
@@ -161,6 +173,52 @@ export function renderTab(
           hitRect.setAttribute('fill', 'transparent');
           hitRect.setAttribute('stroke', 'none');
           targetEl.appendChild(hitRect);
+
+          const techs = options.noteExtrasById?.[note.id]?.guitarTechniques;
+          if (techs && techs.length > 0) {
+            const techGroup = document.createElementNS(SVG_NS, 'g');
+            techGroup.setAttribute('data-tab-tech-note-id', note.id);
+            techGroup.setAttribute('data-tab-techniques', techs.join(','));
+
+            if (techs.includes('bend')) {
+              const bendPath = document.createElementNS(SVG_NS, 'path');
+              bendPath.setAttribute(
+                'd',
+                `M ${slot.x + 7} ${hitY - 2} Q ${slot.x + 13} ${hitY - 4} ${slot.x + 13} ${hitY - 13}`
+              );
+              bendPath.setAttribute('fill', 'none');
+              bendPath.setAttribute('stroke', '#b45309');
+              bendPath.setAttribute('stroke-width', '1.3');
+              techGroup.appendChild(bendPath);
+            }
+
+            if (techs.includes('slide')) {
+              const slideLine = document.createElementNS(SVG_NS, 'line');
+              slideLine.setAttribute('x1', String(slot.x + 6));
+              slideLine.setAttribute('y1', String(hitY + 4));
+              slideLine.setAttribute('x2', String(slot.x + 14));
+              slideLine.setAttribute('y2', String(hitY - 5));
+              slideLine.setAttribute('stroke', '#0284c7');
+              slideLine.setAttribute('stroke-width', '1.4');
+              techGroup.appendChild(slideLine);
+            }
+
+            const topLabels = techs
+              .map((t) => TECH_SYMBOL_MAP[t] ?? t)
+              .join(' ');
+            const labelEl = document.createElementNS(SVG_NS, 'text');
+            labelEl.setAttribute('x', String(slot.x));
+            labelEl.setAttribute('y', String(line.tabY + 8));
+            labelEl.setAttribute('text-anchor', 'middle');
+            labelEl.setAttribute('font-size', '10');
+            labelEl.setAttribute('font-weight', '700');
+            labelEl.setAttribute('fill', '#b45309');
+            labelEl.setAttribute('class', 'nb-tab-tech-label');
+            labelEl.textContent = topLabels;
+            techGroup.appendChild(labelEl);
+
+            targetEl.appendChild(techGroup);
+          }
         }
       }
     }

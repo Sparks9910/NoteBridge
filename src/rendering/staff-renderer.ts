@@ -18,14 +18,20 @@ import type {
   ResolvedNote,
   ScoreDocument,
 } from '../domain/types.ts';
+import { GUITAR_TECHNIQUE_OPTIONS } from '../domain/v2-instruments.ts';
 import type {
   Beat,
+  GuitarTechnique,
   MeasureNotationExtra,
   NoteNotationExtra,
   Track,
   V2Measure,
 } from '../domain/v2-types.ts';
 import type { ScoreLayout } from './layout-engine.ts';
+
+const STAFF_TECH_SYMBOL_MAP: Readonly<Record<GuitarTechnique, string>> = Object.fromEntries(
+  GUITAR_TECHNIQUE_OPTIONS.map((t) => [t.id, t.staffSymbol])
+) as Record<GuitarTechnique, string>;
 
 export interface StaffRenderOptions {
   activeNoteId?: string | null;
@@ -476,6 +482,18 @@ export function renderStaff(
           'font-weight': 700,
           fill: '#0f172a',
           'data-staff-ornament': item.noteId,
+        });
+      }
+      if (extra.guitarTechniques && extra.guitarTechniques.length > 0) {
+        const techText = extra.guitarTechniques
+          .map((t) => STAFF_TECH_SYMBOL_MAP[t] ?? t)
+          .join(' ');
+        appendOverlayText(svg, x, staffY + 24, techText, {
+          'font-size': 10,
+          'font-weight': 700,
+          fill: '#b45309',
+          'data-staff-technique': item.noteId,
+          'data-techniques': extra.guitarTechniques.join(','),
         });
       }
       if (extra.dynamic) {

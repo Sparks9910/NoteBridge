@@ -11,6 +11,8 @@ export interface ScheduledNote {
   startTimeMs: number;
   durationMs: number;
   velocity?: number;
+  trackId?: string;
+  instrumentId?: InstrumentId;
 }
 
 export interface ScheduledMetronomeTick {
@@ -191,7 +193,13 @@ export class WebAudioEngine implements AudioEngine {
         const startSec = baseSec + msToSeconds(note.startTimeMs);
         const durSec = Math.max(0.05, msToSeconds(note.durationMs));
         const velocity = note.velocity ?? 0.85;
-        this.triggerInstrumentNote(note.midiPitch, durSec, startSec, velocity);
+        this.triggerInstrumentNote(
+          note.midiPitch,
+          durSec,
+          startSec,
+          velocity,
+          note.instrumentId ?? this.currentInstrumentId
+        );
       }
       return { ok: true, value: undefined };
     } catch {
@@ -308,10 +316,11 @@ export class WebAudioEngine implements AudioEngine {
     midiPitch: number,
     durSec: number,
     startSec: number,
-    velocity: number
+    velocity: number,
+    instrumentId: InstrumentId = this.currentInstrumentId
   ): void {
     const noteName = Tone.Frequency(midiPitch, 'midi').toNote();
-    if (this.currentInstrumentId === 'electric-guitar-clean') {
+    if (instrumentId === 'electric-guitar-clean') {
       this.ensureGuitarCleanSynth().triggerAttackRelease(
         noteName,
         durSec,
@@ -320,7 +329,7 @@ export class WebAudioEngine implements AudioEngine {
       );
       return;
     }
-    if (this.currentInstrumentId === 'electric-guitar-od') {
+    if (instrumentId === 'electric-guitar-od') {
       this.ensureGuitarOdSynth().triggerAttackRelease(
         noteName,
         durSec,
@@ -329,7 +338,7 @@ export class WebAudioEngine implements AudioEngine {
       );
       return;
     }
-    if (this.currentInstrumentId === 'acoustic-guitar') {
+    if (instrumentId === 'acoustic-guitar') {
       this.ensureAcousticGuitarSynth().triggerAttackRelease(
         noteName,
         durSec,
@@ -338,7 +347,7 @@ export class WebAudioEngine implements AudioEngine {
       );
       return;
     }
-    if (this.currentInstrumentId === 'bass') {
+    if (instrumentId === 'bass') {
       this.ensureBassSynth().triggerAttackRelease(
         noteName,
         durSec,
@@ -348,7 +357,7 @@ export class WebAudioEngine implements AudioEngine {
       return;
     }
     if (
-      this.currentInstrumentId === 'piano' &&
+      instrumentId === 'piano' &&
       this.piano &&
       this.mode === 'soundfont'
     ) {

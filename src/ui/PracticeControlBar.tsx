@@ -16,6 +16,7 @@ import {
   type TuningPresetId,
 } from '../domain/v2-instruments.ts';
 import type { InstrumentId, ViewLayerType } from '../domain/v2-types.ts';
+import { TrackMixerBar } from './TrackMixerBar.tsx';
 
 const INSTRUMENT_TEST_IDS: Record<InstrumentId, string> = {
   'electric-guitar-clean': 'practice-inst-electric-guitar',
@@ -63,6 +64,7 @@ export function PracticeControlBar() {
   const currentSpeedPercent = usePracticeStore((s) => s.currentSpeedPercent);
   const completedLoopCount = usePracticeStore((s) => s.completedLoopCount);
   const autoScrollEnabled = usePracticeStore((s) => s.autoScrollEnabled);
+  const showTunerPanel = usePracticeStore((s) => s.showTunerPanel);
 
   const profile = getInstrumentProfile(selectedInstrumentId);
   const measureCount = Math.max(1, doc.measures.length);
@@ -187,6 +189,16 @@ export function PracticeControlBar() {
             </button>
           ))}
         </div>
+
+        <button
+          type="button"
+          className={`nb-btn nb-btn-sm ${showTunerPanel ? 'nb-btn-active' : ''}`}
+          data-testid="btn-toggle-tuner"
+          aria-pressed={showTunerPanel}
+          onClick={() => practiceStore.getState().toggleTunerPanel()}
+        >
+          调音器
+        </button>
 
         <button
           type="button"
@@ -479,6 +491,8 @@ export function PracticeControlBar() {
           快捷键：空格 播/停 · ←/→ 跳小节 · R 回A点
         </span>
       </div>
+
+      <TrackMixerBar />
     </section>
   );
 }

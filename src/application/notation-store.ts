@@ -11,9 +11,11 @@ import type {
   Result,
   ScoreDocument,
 } from '../domain/types.ts';
+import { normalizeGuitarTechniques } from '../domain/v2-instruments.ts';
 import { migrateV1ToV2 } from '../domain/v2-serializer.ts';
 import type {
   Beat,
+  GuitarTechnique,
   InstrumentId,
   MeasureNotationExtra,
   NoteNotationExtra,
@@ -71,6 +73,7 @@ export interface NotationStoreState {
   deleteVoice2Note: (measureIndex: number, beatIndex?: number) => Result<void>;
   deleteVoice2NoteById: (beatId: string) => Result<void>;
   setNoteExtra: (noteId: string, patch: Partial<NoteNotationExtra>) => void;
+  toggleGuitarTechnique: (noteId: string, technique: GuitarTechnique) => void;
   clearNoteExtra: (noteId: string) => void;
   setMeasureExtra: (
     measureIndex: number,
@@ -143,7 +146,17 @@ function cloneTrack(track: Track): Track {
         ...m,
         beats: m.beats.map((b) => ({
           ...b,
-          notes: b.notes.map((n) => ({ ...n })),
+          notes: b.notes.map((n) => ({
+            ...n,
+            guitar: n.guitar
+              ? {
+                  ...n.guitar,
+                  techniques: n.guitar.techniques
+                    ? [...n.guitar.techniques]
+                    : undefined,
+                }
+              : undefined,
+          })),
         })),
       })),
     })),
@@ -176,7 +189,15 @@ function applyNoteExtraToBeat(beat: Beat, extra: NoteNotationExtra | undefined):
   if (!extra) return beat;
   const next: Beat = {
     ...beat,
-    notes: beat.notes.map((n) => ({ ...n })),
+    notes: beat.notes.map((n) => ({
+      ...n,
+      guitar: n.guitar
+        ? {
+            ...n.guitar,
+            techniques: n.guitar.techniques ? [...n.guitar.techniques] : undefined,
+          }
+        : undefined,
+    })),
   };
   if (extra.lyric !== undefined) {
     if (extra.lyric.trim().length > 0) next.lyric = extra.lyric;
@@ -197,6 +218,22 @@ function applyNoteExtraToBeat(beat: Beat, extra: NoteNotationExtra | undefined):
       next.notes[0].fingering = extra.fingering.trim();
     } else {
       delete next.notes[0].fingering;
+    }
+  }
+  if (next.notes[0]) {
+    const normalizedTechs = normalizeGuitarTechniques(extra.guitarTechniques);
+    const pos = extra.guitarPosition;
+    if (pos || normalizedTechs.length > 0 || next.notes[0].guitar) {
+      const existing = next.notes[0].guitar;
+      const mergedStr = pos?.string ?? existing?.string ?? 1;
+      const mergedFret = pos?.fret ?? existing?.fret ?? 0;
+      if (extra.guitarTechniques !== undefined || normalizedTechs.length > 0 || pos) {
+        next.notes[0].guitar = {
+          string: mergedStr,
+          fret: mergedFret,
+          ...(normalizedTechs.length > 0 ? { techniques: normalizedTechs } : {}),
+        };
+      }
     }
   }
   return next;
@@ -281,6 +318,24 @@ export function createNotationStore(): NotationStoreApi {
               if (beat.slurEnd) extra.slurEnd = true;
               const fg = beat.notes[0]?.fingering;
               if (fg) extra.fingering = fg;
+              const guitarMeta = beat.notes[0]?.guitar;
+              if (guitarMeta) {
+                if (
+                  Number.isInteger(guitarMeta.string) &&
+                  guitarMeta.string >= 1 &&
+                  Number.isInteger(guitarMeta.fret) &&
+                  guitarMeta.fret >= 0
+                ) {
+                  extra.guitarPosition = {
+                    string: guitarMeta.string,
+                    fret: guitarMeta.fret,
+                  };
+                }
+                const techs = normalizeGuitarTechniques(guitarMeta.techniques);
+                if (techs.length > 0) {
+                  extra.guitarTechniques = techs;
+                }
+              }
               if (Object.keys(extra).length > 0) {
                 noteExtrasById[beat.id] = extra;
               }
@@ -535,6 +590,27 @@ export function createNotationStore(): NotationStoreApi {
       set((state) => {
         const prev = state.noteExtrasById[noteId] ?? {};
         const merged: NoteNotationExtra = { ...prev, ...patch };
+        return {
+          noteExtrasById: {
+            ...state.noteExtrasById,
+            [noteId]: merged,
+          },
+        };
+      });
+    },
+
+    toggleGuitarTechnique: (noteId, technique) => {
+      set((state) => {
+        const prev = state.noteExtrasById[noteId] ?? {};
+        const current = normalizeGuitarTechniques(prev.guitarTechniques);
+        const exists = current.includes(technique);
+        const nextTechs = exists
+          ? current.filter((t) => t !== technique)
+          : normalizeGuitarTechniques([...current, technique]);
+        const merged: NoteNotationExtra = {
+          ...prev,
+          guitarTechniques: nextTechs.length > 0 ? nextTechs : undefined,
+        };
         return {
           noteExtrasById: {
             ...state.noteExtrasById,

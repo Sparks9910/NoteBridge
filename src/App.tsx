@@ -16,12 +16,14 @@ import { PracticeControlBar } from './ui/PracticeControlBar.tsx';
 import { ReferencePane } from './ui/ReferencePane.tsx';
 import { ScoreCanvas } from './ui/ScoreCanvas.tsx';
 import { Toolbar } from './ui/Toolbar.tsx';
+import { TunerPanel } from './ui/TunerPanel.tsx';
 
 export default function App() {
   const activePage = useWorkspaceStore((s) => s.activePage);
   const workMode = useWorkspaceStore((s) => s.workMode);
   const showReferencePanel = useNotationStore((s) => s.showReferencePanel);
   const selectedInstrumentId = usePracticeStore((s) => s.selectedInstrumentId);
+  const showTunerPanel = usePracticeStore((s) => s.showTunerPanel);
   const activeDockType = getInstrumentProfile(selectedInstrumentId).dockType;
 
   useEffect(() => {
@@ -65,6 +67,7 @@ export default function App() {
         ) : (
           <>
             <PracticeControlBar />
+            {showTunerPanel && <TunerPanel />}
             {activeDockType === 'fretboard' && <GuitarFretboardDock />}
             {activeDockType === 'piano-keys' && <PianoKeysDock />}
             {activeDockType === 'melody-bar' && <MelodyLyricDock />}

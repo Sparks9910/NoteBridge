@@ -135,6 +135,10 @@ export function ScoreCanvas() {
       resolvedNotes.map((rn) => ({
         noteId: rn.noteId,
         midiPitch: rn.midiPitch,
+        manualPosition:
+          manualFretPositions[rn.noteId] ??
+          activeNoteExtras?.[rn.noteId]?.guitarPosition ??
+          null,
       })),
       {
         openStringMidis: tuning.openStringMidis,
@@ -150,6 +154,7 @@ export function ScoreCanvas() {
     safeCapo,
     profile.maxFret,
     manualFretPositions,
+    activeNoteExtras,
   ]);
 
   const layout = useMemo(() => {
@@ -333,6 +338,7 @@ export function ScoreCanvas() {
           selectedNoteId: cursor.selectedNoteId,
           capo: safeCapo,
           tuningLabel: tuning.label,
+          noteExtrasById: activeNoteExtras,
           measureExtrasByIndex: activeMeasureExtras,
         });
       }

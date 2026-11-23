@@ -9,6 +9,39 @@ import type { InstrumentId, ViewLayerType } from '../domain/v2-types.ts';
 
 export type GuitarToneMode = 'clean' | 'overdrive';
 
+export interface TrackMixChannel {
+  muted: boolean;
+  solo: boolean;
+  gain: number;
+}
+
+export interface ResolvedTrackAudibility {
+  audible: boolean;
+  effectiveGain: number;
+}
+
+export function resolveTrackAudibility(
+  trackIds: readonly string[],
+  mixMap: Readonly<Record<string, TrackMixChannel | undefined>>
+): Record<string, ResolvedTrackAudibility> {
+  const anySolo = trackIds.some((id) => Boolean(mixMap[id]?.solo));
+  const out: Record<string, ResolvedTrackAudibility> = {};
+
+  for (const id of trackIds) {
+    const ch = mixMap[id];
+    const muted = Boolean(ch?.muted);
+    const solo = Boolean(ch?.solo);
+    const rawGain = ch?.gain ?? 1;
+    const effectiveGain = Number.isFinite(rawGain)
+      ? Math.max(0, Math.min(1.5, rawGain))
+      : 1;
+    const audible = !muted && (!anySolo || solo) && effectiveGain > 0;
+    out[id] = { audible, effectiveGain };
+  }
+
+  return out;
+}
+
 export interface PracticeViewFlags {
   staff: boolean;
   jianpu: boolean;
@@ -41,6 +74,8 @@ export interface PracticeStoreState {
 
   muteRightHand: boolean;
   muteLeftHand: boolean;
+  trackMixByTrackId: Record<string, TrackMixChannel>;
+  showTunerPanel: boolean;
 
   abLoopEnabled: boolean;
   loopStartMeasure: number;
@@ -75,6 +110,12 @@ export interface PracticeStoreState {
 
   setMuteRightHand: (muted: boolean) => void;
   setMuteLeftHand: (muted: boolean) => void;
+  toggleTrackMute: (trackId: string) => void;
+  toggleTrackSolo: (trackId: string) => void;
+  setTrackGain: (trackId: string, gain: number) => void;
+  muteLeadTrackForPlayAlong: (leadTrackId: string) => void;
+  resetTrackMixer: () => void;
+  toggleTunerPanel: (show?: boolean) => void;
 
   setAbLoopEnabled: (enabled: boolean) => void;
   setLoopRange: (start: number, end: number, measureCount?: number) => void;
@@ -119,6 +160,8 @@ export function createPracticeStore(): PracticeStoreApi {
 
     muteRightHand: false,
     muteLeftHand: false,
+    trackMixByTrackId: {},
+    showTunerPanel: false,
 
     abLoopEnabled: false,
     loopStartMeasure: 0,
@@ -229,6 +272,88 @@ export function createPracticeStore(): PracticeStoreApi {
 
     setMuteLeftHand: (muted) => {
       set({ muteLeftHand: muted });
+    },
+
+    toggleTrackMute: (trackId) => {
+      set((state) => {
+        const prev = state.trackMixByTrackId[trackId] ?? {
+          muted: false,
+          solo: false,
+          gain: 1,
+        };
+        return {
+          trackMixByTrackId: {
+            ...state.trackMixByTrackId,
+            [trackId]: { ...prev, muted: !prev.muted },
+          },
+        };
+      });
+    },
+
+    toggleTrackSolo: (trackId) => {
+      set((state) => {
+        const prev = state.trackMixByTrackId[trackId] ?? {
+          muted: false,
+          solo: false,
+          gain: 1,
+        };
+        const nextSolo = !prev.solo;
+        return {
+          trackMixByTrackId: {
+            ...state.trackMixByTrackId,
+            [trackId]: {
+              ...prev,
+              solo: nextSolo,
+              muted: nextSolo ? false : prev.muted,
+            },
+          },
+        };
+      });
+    },
+
+    setTrackGain: (trackId, gain) => {
+      const safeGain = Number.isFinite(gain)
+        ? Math.max(0, Math.min(1.5, gain))
+        : 1;
+      set((state) => {
+        const prev = state.trackMixByTrackId[trackId] ?? {
+          muted: false,
+          solo: false,
+          gain: 1,
+        };
+        return {
+          trackMixByTrackId: {
+            ...state.trackMixByTrackId,
+            [trackId]: { ...prev, gain: safeGain },
+          },
+        };
+      });
+    },
+
+    muteLeadTrackForPlayAlong: (leadTrackId) => {
+      set((state) => {
+        const nextMap: Record<string, TrackMixChannel> = {};
+        for (const [id, ch] of Object.entries(state.trackMixByTrackId)) {
+          nextMap[id] = { ...ch, solo: false };
+        }
+        const prevLead = nextMap[leadTrackId] ?? {
+          muted: false,
+          solo: false,
+          gain: 1,
+        };
+        nextMap[leadTrackId] = { ...prevLead, muted: true, solo: false };
+        return { trackMixByTrackId: nextMap };
+      });
+    },
+
+    resetTrackMixer: () => {
+      set({ trackMixByTrackId: {} });
+    },
+
+    toggleTunerPanel: (show) => {
+      set((state) => ({
+        showTunerPanel: show !== undefined ? show : !state.showTunerPanel,
+      }));
     },
 
     setAbLoopEnabled: (enabled) => {

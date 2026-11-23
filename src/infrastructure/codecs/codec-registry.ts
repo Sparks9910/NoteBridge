@@ -3,6 +3,7 @@ import type { Result } from '../../domain/types.ts';
 import { parseJianpuTextToScoreV2 } from '../../domain/v2-jianpu-text.ts';
 import { deserializeLibraryBackup } from '../../domain/v2-serializer.ts';
 import type { ImportFormat, ScoreDocumentV2 } from '../../domain/v2-types.ts';
+import { importGuitarProToScoreV2 } from './guitarpro-codec.ts';
 import { importMidiToScoreV2 } from './midi-codec.ts';
 import { importMusicXmlToScoreV2, importMxlToScoreV2 } from './musicxml-codec.ts';
 
@@ -17,6 +18,13 @@ export function detectImportFormat(filename: string): ImportFormat | null {
   if (lower.endsWith('.musicxml') || lower.endsWith('.xml')) return 'musicxml';
   if (lower.endsWith('.mxl')) return 'mxl';
   if (lower.endsWith('.mid') || lower.endsWith('.midi')) return 'midi';
+  if (
+    lower.endsWith('.gp') ||
+    lower.endsWith('.gp5') ||
+    lower.endsWith('.gpx')
+  ) {
+    return 'guitarpro';
+  }
   if (lower.endsWith('.json')) return 'json';
   if (lower.endsWith('.txt')) return 'jianpu-text';
   return null;
@@ -38,13 +46,21 @@ export async function importScoreFromFileData(
       ok: false,
       error: createAppError(
         'STORAGE_SCHEMA_CORRUPTED',
-        '不支持的文件格式，请导入 .musicxml、.mxl、.mid、.json 或简谱 .txt 文件'
+        '不支持的文件格式，请导入 .musicxml、.mxl、.mid、.gp、.gp5、.gpx、.json 或简谱 .txt 文件'
       ),
     };
   }
 
   const baseTitle = stripExtension(payload.filename);
   const decoder = new TextDecoder('utf-8');
+
+  if (format === 'guitarpro') {
+    const res = await importGuitarProToScoreV2(payload.bytes, {
+      title: baseTitle,
+      nowMs: payload.nowMs,
+    });
+    return res.ok ? { ok: true, value: [res.value] } : res;
+  }
 
   if (format === 'mxl') {
     const res = await importMxlToScoreV2(payload.bytes, {

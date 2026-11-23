@@ -1714,3 +1714,315 @@ body {
   color: #1d4ed8;
   font-weight: 600;
 }
+
+/* V2.3 多轨伴奏混音条 */
+.nb-mixer-bar {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid var(--nb-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nb-mixer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nb-mixer-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.nb-mixer-channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nb-mixer-channel {
+  flex: 1 1 240px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid var(--nb-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nb-mixer-channel-silenced {
+  opacity: 0.62;
+  background: #f1f5f9;
+}
+
+.nb-mixer-track-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nb-mixer-track-name {
+  font-size: 13px;
+  color: var(--nb-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nb-mixer-track-inst {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.nb-mixer-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.nb-btn-danger-active {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #ffffff;
+}
+
+.nb-btn-solo-active {
+  background: #d97706;
+  border-color: #d97706;
+  color: #ffffff;
+}
+
+.nb-mixer-gain-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--nb-muted);
+}
+
+.nb-mixer-gain-field input[type='range'] {
+  width: 76px;
+}
+
+.nb-mixer-gain-val {
+  min-width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* V2.3 内置网页调音器 */
+.nb-tuner-panel {
+  background: var(--nb-panel);
+  border: 1px solid var(--nb-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nb-tuner-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nb-tuner-title-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.nb-tuner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nb-tuner-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.nb-tuner-meter-card {
+  flex: 1 1 280px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid var(--nb-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nb-tuner-readouts {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.nb-tuner-note {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--nb-text);
+  min-width: 44px;
+}
+
+.nb-tuner-hz {
+  font-size: 13px;
+  color: var(--nb-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.nb-tuner-status {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.nb-tuner-in-tune {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.nb-tuner-flat {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.nb-tuner-sharp {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.nb-tuner-gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nb-tuner-gauge-track {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f59e0b 0%, #22c55e 45%, #22c55e 55%, #ef4444 100%);
+}
+
+.nb-tuner-gauge-sweetspot {
+  position: absolute;
+  left: 45%;
+  width: 10%;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.8);
+  border-right: 1px solid rgba(255, 255, 255, 0.8);
+}
+
+.nb-tuner-gauge-needle {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 4px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: #0f172a;
+}
+
+.nb-tuner-gauge-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--nb-muted);
+}
+
+.nb-tuner-strings {
+  flex: 1 1 280px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-content: flex-start;
+}
+
+.nb-tuner-str-btn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 68px;
+  padding: 5px 8px;
+}
+
+.nb-tuner-str-btn small {
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.nb-tuner-str-matched {
+  border-color: #16a34a;
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.2);
+}
+
+/* V2.3 导入弹窗 OMR 标签页 */
+.nb-modal-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 10px 18px 0;
+  border-bottom: 1px solid var(--nb-border);
+}
+
+.nb-omr-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nb-omr-guide {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1e3a8a;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nb-omr-config-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.nb-warning-banner {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fefce8;
+  border: 1px solid #fde047;
+  color: #854d0e;
+  font-size: 13px;
+}

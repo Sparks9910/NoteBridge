@@ -40,7 +40,22 @@ export type OrnamentType = 'trill' | 'staccato' | 'accent' | 'fermata';
 export type MeasureBarlineType = 'single' | 'double' | 'final';
 
 /** V2.1 支持导入的外部格式 */
-export type ImportFormat = 'musicxml' | 'mxl' | 'midi' | 'jianpu-text' | 'json';
+export type ImportFormat =
+  | 'musicxml'
+  | 'mxl'
+  | 'midi'
+  | 'guitarpro'
+  | 'jianpu-text'
+  | 'json';
+
+/** V2.3 吉他专属技巧记号 */
+export type GuitarTechnique =
+  | 'bend'
+  | 'slide'
+  | 'hammer'
+  | 'pull'
+  | 'palm-mute'
+  | 'vibrato';
 
 /** V2.1 音符/节拍扩展排版记号（供应用层与渲染层共享） */
 export interface NoteNotationExtra {
@@ -53,6 +68,8 @@ export interface NoteNotationExtra {
   slurStart?: boolean;
   slurEnd?: boolean;
   chordSymbol?: string;
+  guitarTechniques?: GuitarTechnique[];
+  guitarPosition?: { string: number; fret: number };
 }
 
 /** V2.1 小节扩展排版记号（反复记号、跳房子、小节线） */
@@ -83,7 +100,7 @@ export interface ScoreMetadata {
 export interface GuitarNodeMeta {
   string: number;
   fret: number;
-  techniques?: string[];
+  techniques?: GuitarTechnique[];
 }
 
 /** V2 音高节点（同一份 MIDI 与简谱音级单一数据源） */

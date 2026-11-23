@@ -1,4 +1,83 @@
-import type { InstrumentId, Track, ViewLayerType } from './v2-types.ts';
+import type {
+  GuitarTechnique,
+  InstrumentId,
+  Track,
+  ViewLayerType,
+} from './v2-types.ts';
+
+export interface GuitarTechniqueMeta {
+  id: GuitarTechnique;
+  label: string;
+  shortLabel: string;
+  tabSymbol: string;
+  staffSymbol: string;
+}
+
+export const GUITAR_TECHNIQUE_OPTIONS: readonly GuitarTechniqueMeta[] = [
+  {
+    id: 'bend',
+    label: '推弦 (Bend)',
+    shortLabel: '推弦',
+    tabSymbol: '↑',
+    staffSymbol: 'bend',
+  },
+  {
+    id: 'slide',
+    label: '滑音 (Slide)',
+    shortLabel: '滑音',
+    tabSymbol: '/',
+    staffSymbol: 'sl.',
+  },
+  {
+    id: 'hammer',
+    label: '击弦 (H)',
+    shortLabel: '击弦',
+    tabSymbol: 'H',
+    staffSymbol: 'H',
+  },
+  {
+    id: 'pull',
+    label: '勾弦 (P)',
+    shortLabel: '勾弦',
+    tabSymbol: 'P',
+    staffSymbol: 'P',
+  },
+  {
+    id: 'palm-mute',
+    label: '闷音 (P.M.)',
+    shortLabel: '闷音',
+    tabSymbol: 'P.M.',
+    staffSymbol: 'P.M.',
+  },
+  {
+    id: 'vibrato',
+    label: '震音 (Vib)',
+    shortLabel: '震音',
+    tabSymbol: '~~~',
+    staffSymbol: '~~~',
+  },
+];
+
+export const VALID_GUITAR_TECHNIQUES: ReadonlySet<GuitarTechnique> = new Set(
+  GUITAR_TECHNIQUE_OPTIONS.map((item) => item.id)
+);
+
+export function normalizeGuitarTechniques(
+  input: readonly string[] | undefined
+): GuitarTechnique[] {
+  if (!input || input.length === 0) {
+    return [];
+  }
+  const seen = new Set<GuitarTechnique>();
+  for (const raw of input) {
+    if (VALID_GUITAR_TECHNIQUES.has(raw as GuitarTechnique)) {
+      seen.add(raw as GuitarTechnique);
+    }
+  }
+  return GUITAR_TECHNIQUE_OPTIONS.map((item) => item.id).filter((id) =>
+    seen.has(id)
+  );
+}
 
 export type PracticeDockType = 'fretboard' | 'piano-keys' | 'melody-bar';
 

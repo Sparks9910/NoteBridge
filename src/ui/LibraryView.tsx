@@ -268,7 +268,7 @@ export function LibraryView() {
           <div className="nb-library-empty" data-testid="library-empty-hint">
             {searchQuery.trim()
               ? '未找到匹配搜索关键词的曲谱，请尝试更换关键词。'
-              : '乐谱库暂无保存的曲谱，可点击上方“+ 新建曲谱”或导入备份 JSON。'}
+              : '乐谱库暂无保存的曲谱，可点击“+ 新建曲谱”或导入 MusicXML / MIDI / Guitar Pro（.gp/.gp5/.gpx）/ 图片PDF转谱。'}
           </div>
         )}
       </main>

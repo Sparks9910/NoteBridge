@@ -13,6 +13,7 @@ import {
   useScoreStore,
 } from '../application/score-store.ts';
 import type { BaseDuration, KeySignature, TimeSignature } from '../domain/types.ts';
+import { GUITAR_TECHNIQUE_OPTIONS } from '../domain/v2-instruments.ts';
 import type {
   DynamicMarking,
   InstrumentId,
@@ -48,7 +49,7 @@ const KEYPAD_TABS: ReadonlyArray<{ id: KeypadTabId; label: string }> = [
   { id: 'input', label: '录入' },
   { id: 'setup', label: '谱/调/拍/速' },
   { id: 'measure', label: '小节' },
-  { id: 'markings', label: '线与记号' },
+  { id: 'markings', label: '线与技巧' },
   { id: 'lyrics', label: '歌词' },
   { id: 'fingering', label: '指法' },
   { id: 'voices', label: '声部与轨道' },
@@ -815,6 +816,34 @@ export function InputKeypad() {
             >
               连音终点
             </button>
+          </div>
+
+          <div className="nb-keypad-group">
+            <span className="nb-group-label">吉他技巧</span>
+            {GUITAR_TECHNIQUE_OPTIONS.map((tech) => {
+              const active = Boolean(
+                targetExtra?.guitarTechniques?.includes(tech.id)
+              );
+              return (
+                <button
+                  key={tech.id}
+                  type="button"
+                  className={`nb-btn nb-btn-sm ${active ? 'nb-btn-active' : ''}`}
+                  data-testid={`btn-tech-${tech.id}`}
+                  aria-pressed={active}
+                  disabled={!targetNoteId}
+                  onClick={() => {
+                    if (!targetNoteId) return;
+                    notationStore.getState().bindScoreId(doc.id);
+                    notationStore
+                      .getState()
+                      .toggleGuitarTechnique(targetNoteId, tech.id);
+                  }}
+                >
+                  {tech.label}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
