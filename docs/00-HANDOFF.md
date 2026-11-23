@@ -1,39 +1,53 @@
 # 00 · 轮次交接回执
 
 ```text
-ROLE: 架构与环境基线负责人（第 3 步）
+ROLE: 核心领域层与渲染/音频基础设施负责人（第 4 步）
 STATUS: DONE
 BRANCH: main
-COMMIT: NONE（基于基线提交 e2ceb5c，本轮未提交）
+COMMIT: d9da7c2（代码与测试提交，本文件更新后将追加文档提交并推送）
 CHANGED:
-- package.json:1-36 初始化工程依赖（react/react-dom/zustand/vexflow/tonal@6.0.0/tone/smplr 及 typescript/vite/vitest/@playwright/test）与 AGENTS.md 第六节约定的全部 npm 脚本入口
-- package-lock.json:1-end 生成 npm 依赖锁文件
-- tsconfig.json:1-22 配置 TypeScript 严格模式（strict / noUnusedLocals / noUnusedParameters / noUncheckedIndexedAccess）
-- vite.config.ts:1-14 配置 Vite + React + Vitest（5173 端口与 node 测试环境）
-- index.html:1-12 新建最小 HTML 入口
-- src/main.tsx:1-13 新建 React 最小挂载入口
-- src/App.tsx:1-8 新建最小占位组件（无业务逻辑）
-- src/domain/types.ts:1-153 建立 GATE-0 共享数据结构（PPQ=480、ScoreDocument、Measure、NoteEvent、ResolvedNote、LayoutSlot、AppError、Result、ErrorCode 及 4 个状态机类型）
-- src/infrastructure/config.ts:1-162 实现 5 个环境变量校验与生产环境开启演示开关强拦截（CONFIG_INVALID）
-- tests/config/config.test.ts:1-103 编写 L0 配置默认值、边界值与生产门禁测试（9 个用例）
-- scripts/smoke.mjs:1-118 编写一键冒烟自检脚本
-- docs/evidence/00-baseline.txt:1-84 留存脱敏环境表与四条基准命令完整实测证据
-- docs/00-HANDOFF.md:1-38 更新本轮交接回执与实测命令记录
+- src/domain/state-machines.ts:1-244 实现 4 个核心状态机（PlaybackState/InputPadState/MeasureValidityState/DocumentState）纯函数流转表、createRequestId 与 createAppError
+- src/domain/rhythm.ts:1-155 实现 PPQ=480 时值换算、4 种拍号小节容量校验、自动连杠分组（computeBeamGroups）及 ticks/ms 互转
+- src/domain/accidental.ts:1-97 实现 12 大调调号升降表与同小节临时升降/还原号作用域计算
+- src/domain/theory.ts:1-277 实现 12 大调首调↔固定调音高映射（符合 A-05）、八度偏移、重升降等音回退、符干方向与 ResolvedNote 推导
+- src/domain/serializer.ts:1-276 实现 ScoreDocument Schema 严格校验与 JSON 序列化/反序列化（统一返回 Result<T>）
+- src/rendering/layout-engine.ts:1-254 实现统一小节宽度、折行分组、双谱共享 LayoutSlot.x 锚点计算与游标 Tick→X 定位
+- src/rendering/staff-renderer.ts:1-213 基于 vexflow@5.9.0 实现五线谱 SVG 渲染，通过 TickContext 校准严格对齐 LayoutSlot.x，并支持连杠与超拍告警框
+- src/rendering/jianpu-renderer.ts:1-348 实现纯数据 buildJianpuRenderModel 与自研简谱 SVG 渲染（数字、升降号、附点、增/减时线、高低音点与双纵线）
+- src/rendering/cursor-overlay.ts:1-125 实现 requestAnimationFrame 游标与音符同步高亮层（与音频调度完全解耦）
+- src/infrastructure/audio-engine.ts:1-340 定义 AudioEngine 抽象接口、msToSeconds 边界换算、WebAudioEngine（Tone.js/smplr 惰性初始化与离线合成器回退）及 MockAudioEngine
+- src/infrastructure/storage-adapter.ts:1-251 基于 appConfig.storageNamespace 实现 localStorage 读写列删及配额/损坏异常中文转换
+- tests/unit/theory.test.ts:1-155 编写 L1 12 大调音高映射、八度、休止符、重升降等音与符干方向单测（6 个用例）
+- tests/unit/rhythm.test.ts:1-130 编写 L1 480 Ticks 时值、拍号容量、4/4 与 6/8 连杠及毫秒互转单测（4 个用例）
+- tests/unit/accidental.test.ts:1-51 编写 L1 同小节升降/还原号与跨小节重置单测（3 个用例）
+- tests/unit/state-machines.test.ts:1-174 编写 L1 4 个状态机全部合法流转与非法流转拦截单测（4 个用例）
+- tests/unit/layout-and-infra.test.ts:1-218 编写 L1 布局锚点、简谱坐标 0 偏差、MockAudioEngine 与 StorageAdapter 单测（3 个用例）
+- tests/contract/contracts.test.ts:1-189 编写 L3 Schema 往返、AppError 中文/UUID v4 契约、单位与 domain 纯度扫描测试（4 个用例）
+- docs/00-HANDOFF.md:1-end 更新第 4 步交接回执与实测命令记录
 COMMANDS:
-- node -v; npm -v; git status -sb -> 退出码 0 -> Node v24.15.0 / npm 11.12.1 / main...origin/main
 - npm run typecheck -> 退出码 0 -> 通过（tsc --noEmit 无报错）
 - npm run build -> 退出码 0 -> 通过（15 modules，生成 dist/index.html 与 dist/assets/index-DetIz8OD.js）
 - npm run test:config -> 退出码 0 -> 9 passed / 0 failed / 0 skipped（1 个测试文件）
+- npm run test:unit -> 退出码 0 -> 20 passed / 0 failed / 0 skipped（5 个测试文件）
+- npm run test:contract -> 退出码 0 -> 4 passed / 0 failed / 0 skipped（1 个测试文件）
 - npm run smoke -> 退出码 0 -> 5 passed / 0 failed
-- npm run test:unit / test:service / test:contract / test:e2e:mock / test:browser / test:nonfunc -> 未执行（对应测试目录待第 4-6 步创建）
+- npm run test:service / test:e2e:mock / test:browser / test:nonfunc -> 未执行（对应应用层、UI 与浏览器验收待第 5–6 步创建）
 INTERFACES:
-- src/domain/types.ts 导出 GATE-0 共享契约：PPQ、ErrorCode、AppError、Result<T>、KeySignature、TimeSignature、ViewMode、BaseDuration、Accidental、NoteEvent、Measure、ScoreDocument、ResolvedNote、LayoutSlot、PlaybackState、InputPadState、MeasureValidityState、DocumentState
-- src/infrastructure/config.ts 导出 AppEnv、AppConfig、ConfigError、loadConfig(env?)、appConfig；VITE_APP_ENV === 'production' 且 VITE_ENABLE_DEMO_MODE === 'true' 时启动即抛出 ConfigError（code: 'CONFIG_INVALID'）
-- package.json 固定全部 L0-L6 与 smoke 脚本入口；注意当前 npmmirror 源下 tonal 固定为 6.0.0（6.9.0 依赖的 @tonaljs/voice-leading@5.1.8 在镜像源缺失）
+- src/domain/state-machines.ts 导出 transitionPlaybackState、transitionInputPadState、transitionMeasureValidityState、transitionDocumentState、createRequestId、createAppError
+- src/domain/rhythm.ts 导出 calculateDurationTicks、getMeasureCapacityTicks、getBeatTicks、calculateMeasureTotalTicks、validateMeasureRhythm、computeBeamGroups、ticksToMs、msToTicks
+- src/domain/accidental.ts 导出 KEY_SIGNATURE_ACCIDENTALS、getKeySignatureAccidentalCount、offsetToAccidental、computeMeasureDisplayAccidentals
+- src/domain/theory.ts 导出 KEY_BASE_MIDI_MAP、resolveNotePitch、computeStemDirection、resolveMeasureNotes、resolveScoreNotes
+- src/domain/serializer.ts 导出 validateScoreDocument、serializeScoreDocument、deserializeScoreDocument
+- src/rendering/layout-engine.ts 导出 computeScoreLayout、getCursorXForTick
+- src/rendering/staff-renderer.ts 导出 renderStaff
+- src/rendering/jianpu-renderer.ts 导出 buildJianpuRenderModel、renderJianpu
+- src/rendering/cursor-overlay.ts 导出 CursorOverlayController
+- src/infrastructure/audio-engine.ts 导出 AudioEngine、WebAudioEngine、MockAudioEngine、msToSeconds
+- src/infrastructure/storage-adapter.ts 导出 StorageAdapter、createStorageAdapter
 ASSUMPTIONS:
-- 沿用 docs/02-架构与契约.md 既定假设 A-01 至 A-10，未新增业务假设
+- 沿用 docs/02-架构与契约.md 既定假设 A-01 至 A-10；重升降音（如 G 调 #7、F 调 b4）按 MIDI 等音拼写回退为合法单升降/自然音名，确保兼容 VexFlow 与 GATE-0 Accidental 契约
 BLOCKERS:
 - NONE
 NEXT:
-- 第 3 步环境与基线完成，可进入第 4 步核心领域层与渲染/音频基础设施开发
+- 第 4 步核心领域层与渲染/音频基础设施开发完成，可进入第 5 步应用层（score-store/input-store/playback-controller）与 React UI 组件（Toolbar/ScoreCanvas/InputKeypad/PlaybackBar）开发及 L2/L4 测试
 ```
