@@ -1,5 +1,6 @@
-import { type ChangeEvent, useEffect, useRef, useState } from 'react';
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { libraryStore } from '../application/library-store.ts';
+import { inspectJianpuText } from '../domain/v2-jianpu-text.ts';
 import {
   checkOmrProviderHealth,
   DEFAULT_LOCAL_OMR_ENDPOINT,
@@ -38,6 +39,11 @@ export function ImportModal({ isOpen, onClose }: ImportModalProps) {
   const [apiKey, setApiKey] = useState('');
   const [healthStatus, setHealthStatus] = useState<OmrHealthStatus | null>(null);
   const [omrFile, setOmrFile] = useState<OmrFileInput | null>(null);
+
+  const jianpuPreview = useMemo(
+    () => (jianpuText.trim() ? inspectJianpuText(jianpuText) : null),
+    [jianpuText]
+  );
 
   useEffect(() => {
     if (!isOpen) return;
@@ -255,13 +261,40 @@ export function ImportModal({ isOpen, onClose }: ImportModalProps) {
                   className="nb-textarea"
                   rows={5}
                   data-testid="textarea-jianpu-import"
-                  placeholder={'例如：\n标题: 小星星\n1=C 4/4 BPM=100\n1 1 5 5 | 6 6 5 - | 4_ 4_ 3_ 3_ 2_ 2_ 1 - ||'}
+                  placeholder={'例如：\n标题: 小星星\n1=C 4/4 BPM=100\n1 1 5 5 | 6 6 5 - | 4 4 3 3 | 2 2 1 - ||'}
                   value={jianpuText}
                   onChange={(e) => setJianpuText(e.target.value)}
                 />
                 <span className="nb-help-text">
-                  语法：1–7 音级，0 休止，# / b 升降，&apos; / , 高低八度，_ / __ 减时线，- 增时线，. 附点，| 小节线，||: :|| 反复
+                  语法：1–7 音级，0 休止，# / b 升降，&apos; / , 高低八度，_ / / 减时线，- 增时线，. 附点，~ 延音，( ) 连音，| 小节线，||: :|| / |: :| 反复；支持紧凑连写、1=bB 与无小节线自动分小节
                 </span>
+                {jianpuPreview && (
+                  <div
+                    className={
+                      jianpuPreview.ok &&
+                      jianpuPreview.skippedTokens.length === 0 &&
+                      jianpuPreview.overflowMeasures.length === 0
+                        ? 'nb-info-banner'
+                        : 'nb-warning-banner'
+                    }
+                    data-testid="jianpu-parse-preview"
+                    role="status"
+                  >
+                    <span>
+                      {jianpuPreview.ok
+                        ? `识别预览：1=${jianpuPreview.keySignature} · ${jianpuPreview.timeSignature} · BPM=${jianpuPreview.bpm} · ${jianpuPreview.measureCount} 小节 · ${jianpuPreview.noteCount} 音符${
+                            jianpuPreview.skippedTokens.length > 0
+                              ? `（已忽略未识别片段：${jianpuPreview.skippedTokens.slice(0, 6).join(' ')}）`
+                              : ''
+                          }${
+                            jianpuPreview.overflowMeasures.length > 0
+                              ? `（第 ${jianpuPreview.overflowMeasures.slice(0, 6).join('、')} 小节超拍）`
+                              : ''
+                          }`
+                        : jianpuPreview.errorDetail ?? '未能识别简谱内容，请检查输入格式'}
+                    </span>
+                  </div>
+                )}
                 <div>
                   <button
                     type="button"

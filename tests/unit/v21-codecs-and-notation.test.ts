@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatScoreV2ToJianpuText,
+  inspectJianpuText,
   parseJianpuTextToScoreV2,
 } from '../../src/domain/v2-jianpu-text.ts';
 import {
@@ -325,6 +326,193 @@ describe('L1 V2.1 MusicXML / MXL / MIDI / 简谱文本与分谱提取单元测�
     expect(formatted).toContain("2'");
     expect(formatted).toContain('||:');
     expect(formatted).toContain(':||');
+  });
+
+  it('简谱文本多行不混小节、无空小节、支持反复与往返一致', () => {
+    const multiline = [
+      '标题: 欢乐颂多行',
+      '1=C 4/4 BPM=100',
+      '| 3 3 4 5 | 5 4 3 2',
+      '1 1 2 3 | 3. 2_ 2 - ||',
+    ].join('\n');
+
+    const res = parseJianpuTextToScoreV2(multiline);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    const measures = res.value.tracks[0]?.voices[0]?.measures ?? [];
+    expect(measures).toHaveLength(4);
+    for (const m of measures) {
+      expect(m.beats.length).toBeGreaterThan(0);
+      expect(m.beats.reduce((s, b) => s + b.durationTicks, 0)).toBe(1920);
+    }
+    expect(measures[3]?.barline).toBe('final');
+
+    const repeatText = [
+      '1=G 4/4 BPM=96',
+      '|: 1 2 3 4 | 5 6 5 - :| 4 3 2 1 || 1 1 5 5 ||',
+    ].join('\n');
+    const repeatRes = parseJianpuTextToScoreV2(repeatText);
+    expect(repeatRes.ok).toBe(true);
+    if (!repeatRes.ok) return;
+    const rMeasures = repeatRes.value.tracks[0]?.voices[0]?.measures ?? [];
+    expect(rMeasures).toHaveLength(4);
+    expect(rMeasures[0]?.repeatStart).toBe(true);
+    expect(rMeasures[1]?.repeatEnd).toBe(true);
+    expect(rMeasures[2]?.barline).toBe('double');
+    expect(rMeasures[3]?.barline).toBe('final');
+
+    // formatScoreV2ToJianpuText -> parseJianpuTextToScoreV2 往返不产生空小节
+    const roundtripText = formatScoreV2ToJianpuText(repeatRes.value);
+    expect(roundtripText).not.toContain(':|| |');
+    const roundtripRes = parseJianpuTextToScoreV2(roundtripText);
+    expect(roundtripRes.ok).toBe(true);
+    if (!roundtripRes.ok) return;
+    const rtMeasures = roundtripRes.value.tracks[0]?.voices[0]?.measures ?? [];
+    expect(rtMeasures).toHaveLength(4);
+    expect(rtMeasures[0]?.repeatStart).toBe(true);
+    expect(rtMeasures[1]?.repeatEnd).toBe(true);
+    expect(rtMeasures[2]?.barline).toBe('double');
+    expect(rtMeasures[3]?.barline).toBe('final');
+  });
+
+  it('简谱文本支持紧凑连写、变序修饰符、附点二分、斜线减时线、全角与跨小节延音', () => {
+    const compactText = [
+      '1=bB 4/4 速度: 108',
+      '1155 | 665- | 3.2_ 5-. | 1/ 2/ 3/4 | 5//6//7//1\'// | 5 - - - -',
+    ].join('\n');
+
+    const res = parseJianpuTextToScoreV2(compactText);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    expect(res.value.keySignature).toBe('Bb');
+    expect(res.value.bpm).toBe(108);
+
+    const ms = res.value.tracks[0]?.voices[0]?.measures ?? [];
+    expect(ms).toHaveLength(6);
+    expect(ms[0]?.beats.map((b) => b.notes[0]?.degree)).toEqual([1, 1, 5, 5]);
+    expect(ms[1]?.beats.map((b) => b.baseDuration)).toEqual(['quarter', 'quarter', 'half']);
+    expect(ms[2]?.beats[0]?.dotted).toBe(true);
+    expect(ms[2]?.beats[1]?.baseDuration).toBe('eighth');
+    expect(ms[2]?.beats[2]?.baseDuration).toBe('half');
+    expect(ms[2]?.beats[2]?.dotted).toBe(true);
+    expect(ms[3]?.beats.map((b) => b.baseDuration)).toEqual([
+      'eighth',
+      'eighth',
+      'eighth',
+      'quarter',
+    ]);
+    expect(ms[4]?.beats.map((b) => b.baseDuration)).toEqual([
+      'sixteenth',
+      'sixteenth',
+      'sixteenth',
+      'sixteenth',
+    ]);
+    expect(ms[4]?.beats[3]?.notes[0]?.octaveOffset).toBe(1);
+    // 5拍延音拆分为 全音符(1920) + 四分音符(480) 并带 tieStart/tieEnd
+    expect(ms[5]?.beats).toHaveLength(2);
+    expect(ms[5]?.beats[0]?.baseDuration).toBe('whole');
+    expect(ms[5]?.beats[0]?.tieStart).toBe(true);
+    expect(ms[5]?.beats[1]?.baseDuration).toBe('quarter');
+    expect(ms[5]?.beats[1]?.tieEnd).toBe(true);
+
+    // 变序修饰符、全角字符、智能引号与组合音点、升降后缀、跨小节增时线
+    const variants = [
+      '调号: #F',
+      '拍号: 3/4',
+      '♩=96',
+      '３._ ５’ ５\u0323 +1 | 4# 5 | - b7 (1 2 3) | [C] 1 ~ 1 [G7] 2',
+    ].join('\n');
+    const vRes = parseJianpuTextToScoreV2(variants);
+    expect(vRes.ok).toBe(true);
+    if (!vRes.ok) return;
+    expect(vRes.value.keySignature).toBe('Gb');
+    expect(vRes.value.timeSignature).toBe('3/4');
+    expect(vRes.value.bpm).toBe(96);
+
+    const vMs = vRes.value.tracks[0]?.voices[0]?.measures ?? [];
+    expect(vMs).toHaveLength(4);
+    expect(vMs[0]?.beats[0]?.baseDuration).toBe('eighth');
+    expect(vMs[0]?.beats[0]?.dotted).toBe(true);
+    expect(vMs[0]?.beats[1]?.notes[0]?.octaveOffset).toBe(1);
+    expect(vMs[0]?.beats[2]?.notes[0]?.octaveOffset).toBe(-1);
+    expect(vMs[0]?.beats[3]?.notes[0]?.octaveOffset).toBe(1);
+
+    expect(vMs[1]?.beats[0]?.notes[0]?.degree).toBe(4);
+    expect(vMs[1]?.beats[0]?.notes[0]?.accidental).toBe('sharp');
+    expect(vMs[1]?.beats[1]?.tieStart).toBe(true);
+
+    // 跨小节 "-" 继承上一音符并自动加 tieEnd；b7 不被误判为和弦
+    expect(vMs[2]?.beats[0]?.notes[0]?.degree).toBe(5);
+    expect(vMs[2]?.beats[0]?.tieEnd).toBe(true);
+    expect(vMs[2]?.beats[1]?.notes[0]?.degree).toBe(7);
+    expect(vMs[2]?.beats[1]?.notes[0]?.accidental).toBe('flat');
+    expect(vMs[2]?.beats[2]?.slurStart).toBe(true);
+    expect(vMs[2]?.beats[4]?.slurEnd).toBe(true);
+
+    // [C] 与 [G7] 不将 7 识别为音符 7，1 ~ 1 带连音线
+    expect(vMs[3]?.beats).toHaveLength(3);
+    expect(vMs[3]?.beats[0]?.chordSymbol).toBe('C');
+    expect(vMs[3]?.beats[0]?.tieStart).toBe(true);
+    expect(vMs[3]?.beats[1]?.tieEnd).toBe(true);
+    expect(vMs[3]?.beats[2]?.chordSymbol).toBe('G7');
+    expect(vMs[3]?.beats[2]?.notes[0]?.degree).toBe(2);
+  });
+
+  it('简谱文本支持无小节线自动分小节、交错歌词与预检诊断 inspectJianpuText', () => {
+    const noBarline = [
+      '# 自动分小节测试',
+      '原唱: 5月天',
+      '[前奏]',
+      '1=D 3/4 速度=120',
+      '歌词: 一 闪 一，闪 亮。晶 晶',
+      '1 1 5 5 6 6 5 -',
+    ].join('\n');
+
+    const res = parseJianpuTextToScoreV2(noBarline);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.keySignature).toBe('D');
+    expect(res.value.timeSignature).toBe('3/4');
+    expect(res.value.bpm).toBe(120);
+
+    const ms = res.value.tracks[0]?.voices[0]?.measures ?? [];
+    // 3/4 容量 1440 ticks: [1,1,5]=1440 | [5,6,6]=1440 | [5-]=960
+    expect(ms).toHaveLength(3);
+    expect(ms[0]?.beats.map((b) => b.lyric)).toEqual(['一', '闪', '一']);
+    expect(ms[1]?.beats.map((b) => b.lyric)).toEqual(['闪', '亮', '晶']);
+    expect(ms[2]?.beats.map((b) => b.lyric)).toEqual(['晶']);
+
+    // 交错歌词行含 | 时不产生空小节，且歌词正确绑定到前一行旋律
+    const interleaved = [
+      '1=C 4/4',
+      '1 1 5 5 | 6 6 5 - |',
+      '一 闪 一 闪 | 亮 晶 晶 |',
+    ].join('\n');
+    const ilRes = parseJianpuTextToScoreV2(interleaved);
+    expect(ilRes.ok).toBe(true);
+    if (!ilRes.ok) return;
+    const ilMs = ilRes.value.tracks[0]?.voices[0]?.measures ?? [];
+    expect(ilMs).toHaveLength(2);
+    expect(ilMs[0]?.beats.map((b) => b.lyric)).toEqual(['一', '闪', '一', '闪']);
+    expect(ilMs[1]?.beats.map((b) => b.lyric)).toEqual(['亮', '晶', '晶']);
+
+    // 单音符行 "3. -" 不被误判为序号前缀，且带序号的歌词行 "1. 一闪一闪" 正常剥离序号
+    const singleDottedRes = parseJianpuTextToScoreV2('1=C 4/4\n3. -\n1. 一闪一闪');
+    expect(singleDottedRes.ok).toBe(true);
+    if (!singleDottedRes.ok) return;
+    const sdBeat = singleDottedRes.value.tracks[0]?.voices[0]?.measures[0]?.beats[0];
+    expect(sdBeat?.baseDuration).toBe('half');
+    expect(sdBeat?.dotted).toBe(true);
+    expect(sdBeat?.lyric).toBe('一');
+
+    const diag = inspectJianpuText('1=C 4/4\n1 2 3 4 5 | 8 1 2 3 -');
+    expect(diag.ok).toBe(true);
+    expect(diag.measureCount).toBe(2);
+    expect(diag.noteCount).toBe(8);
+    expect(diag.skippedTokens).toContain('8');
+    expect(diag.overflowMeasures).toEqual([1]);
   });
 
   it('分谱提取（Part Extraction）支持按轨道筛选与钢琴左右手单声部独立提取', () => {

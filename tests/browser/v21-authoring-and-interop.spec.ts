@@ -146,15 +146,37 @@ test.describe('L5 V2.1 制谱对照完全体与 MusicXML/MIDI 互通验证', () 
     ).toHaveCount(4);
     await assertDualStaffAligned(page);
 
-    // 2) 通过简谱文本快捷导入
+    // 2) 通过简谱文本快捷导入（内置示例）
     await page.getByTestId('btn-open-import').click();
     await page.getByTestId('btn-fill-jianpu-sample').click();
+    await expect(page.getByTestId('jianpu-parse-preview')).toContainText('1=C');
+    await expect(page.getByTestId('jianpu-parse-preview')).toContainText('4 小节');
     await page.getByTestId('btn-submit-jianpu-import').click();
 
     await expect(page.getByTestId('score-title-input')).toHaveValue('欢乐颂片段');
     await expect(
       page.locator('[data-testid="jianpu-layer"] [data-note-id]').first()
     ).toContainText('3');
+    await assertDualStaffAligned(page);
+
+    // 3) 通过简谱文本快捷导入多行紧凑写法 + 1=bB + 中文速度指令，验证预览与双谱对齐
+    await page.getByTestId('btn-open-import').click();
+    await page.getByTestId('textarea-jianpu-import').fill(
+      ['标题: 多行简谱导入验证', '1=bB 4/4 速度: 108', '1155 | 665-', '4_4_33 | 221- ||'].join('\n')
+    );
+    await expect(page.getByTestId('jianpu-parse-preview')).toContainText('1=Bb');
+    await expect(page.getByTestId('jianpu-parse-preview')).toContainText('BPM=108');
+    await expect(page.getByTestId('jianpu-parse-preview')).toContainText('4 小节');
+    await expect(page.getByTestId('jianpu-parse-preview')).toContainText('14 音符');
+    await page.getByTestId('btn-submit-jianpu-import').click();
+
+    await expect(page.getByTestId('import-modal')).toHaveCount(0);
+    await expect(page.getByTestId('score-title-input')).toHaveValue('多行简谱导入验证');
+    await expect(page.getByTestId('select-key-signature')).toHaveValue('Bb');
+    await expect(page.getByTestId('input-bpm-number')).toHaveValue('108');
+    await expect(
+      page.locator('[data-testid="jianpu-layer"] [data-note-id]')
+    ).toHaveCount(14);
     await assertDualStaffAligned(page);
 
     await assertCleanRuntime(page, guards);
