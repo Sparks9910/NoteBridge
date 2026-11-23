@@ -2,6 +2,7 @@ import { type ChangeEvent, useMemo, useRef, useState } from 'react';
 import { exportLibraryBackupFile } from '../application/export-service.ts';
 import { libraryStore, useLibraryStore } from '../application/library-store.ts';
 import { workspaceStore } from '../application/workspace-store.ts';
+import { ImportModal } from './ImportModal.tsx';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) {
@@ -34,6 +35,7 @@ export function LibraryView() {
   const lastError = useLibraryStore((s) => s.lastError);
 
   const [notice, setNotice] = useState<string | null>(null);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const filteredEntries = useMemo(() => {
@@ -100,6 +102,14 @@ export function LibraryView() {
             <span className="nb-storage-pill" data-testid="library-storage-usage">
               本地存储：{formatBytes(storageUsageBytes)}
             </span>
+            <button
+              type="button"
+              className="nb-btn nb-btn-primary"
+              data-testid="btn-library-import"
+              onClick={() => setIsImportOpen(true)}
+            >
+              导入曲谱
+            </button>
             <button
               type="button"
               className="nb-btn"
@@ -262,6 +272,10 @@ export function LibraryView() {
           </div>
         )}
       </main>
+      <ImportModal
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+      />
     </div>
   );
 }

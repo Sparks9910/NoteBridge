@@ -1,5 +1,6 @@
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { inputStore, useInputStore } from '../application/input-store.ts';
+import { useNotationStore } from '../application/notation-store.ts';
 import {
   playbackController,
   usePlaybackStore,
@@ -29,6 +30,21 @@ export function ScoreCanvas() {
   const cursor = useInputStore((s) => s.cursor);
   const playbackState = usePlaybackStore((s) => s.playbackState);
   const workMode = useWorkspaceStore((s) => s.workMode);
+  const boundScoreId = useNotationStore((s) => s.boundScoreId);
+  const clef = useNotationStore((s) => s.clef);
+  const tracks = useNotationStore((s) => s.tracks);
+  const activeTrackIndex = useNotationStore((s) => s.activeTrackIndex);
+  const noteExtrasById = useNotationStore((s) => s.noteExtrasById);
+  const measureExtrasByIndex = useNotationStore((s) => s.measureExtrasByIndex);
+  const showReferencePanel = useNotationStore((s) => s.showReferencePanel);
+
+  const isNotationActive = boundScoreId === null || boundScoreId === doc.id;
+  const activeClef = isNotationActive ? clef : 'treble';
+  const voice2Measures = isNotationActive
+    ? tracks[activeTrackIndex]?.voices[1]?.measures
+    : undefined;
+  const activeNoteExtras = isNotationActive ? noteExtrasById : undefined;
+  const activeMeasureExtras = isNotationActive ? measureExtrasByIndex : undefined;
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -55,15 +71,22 @@ export function ScoreCanvas() {
 
   const resolvedNotes = useMemo(() => resolveScoreForView(doc), [doc]);
 
+  const hasLyricsOrMarkings = useMemo(() => {
+    if (!activeNoteExtras) return false;
+    return Object.keys(activeNoteExtras).length > 0;
+  }, [activeNoteExtras]);
+
   const layout = useMemo(() => {
-    const staffLineHeight = doc.viewMode === 'jianpu' ? 0 : 110;
-    const jianpuLineHeight = doc.viewMode === 'staff' ? 0 : 76;
+    const staffLineHeight =
+      doc.viewMode === 'jianpu' ? 0 : activeClef === 'grand' ? 210 : 110;
+    const jianpuLineHeight =
+      doc.viewMode === 'staff' ? 0 : hasLyricsOrMarkings ? 96 : 76;
     return computeScoreLayout(doc, resolvedNotes, {
       containerWidth,
       staffLineHeight,
       jianpuLineHeight,
     });
-  }, [doc, resolvedNotes, containerWidth]);
+  }, [doc, resolvedNotes, containerWidth, activeClef, hasLyricsOrMarkings, showReferencePanel]);
 
   // 初始化并销毁 CursorOverlayController（兼容 React 19 StrictMode）
   useEffect(() => {
@@ -89,6 +112,10 @@ export function ScoreCanvas() {
       } else {
         renderStaff(staffLayerRef.current, doc, resolvedNotes, layout, {
           selectedNoteId: cursor.selectedNoteId,
+          clef: activeClef,
+          voice2Measures,
+          noteExtrasById: activeNoteExtras,
+          measureExtrasByIndex: activeMeasureExtras,
         });
       }
     }
@@ -99,12 +126,23 @@ export function ScoreCanvas() {
       } else {
         renderJianpu(jianpuLayerRef.current, doc, resolvedNotes, layout, {
           selectedNoteId: cursor.selectedNoteId,
+          noteExtrasById: activeNoteExtras,
+          measureExtrasByIndex: activeMeasureExtras,
         });
       }
     }
 
     overlayRef.current?.bindScore(doc, resolvedNotes, layout);
-  }, [doc, resolvedNotes, layout, cursor.selectedNoteId]);
+  }, [
+    doc,
+    resolvedNotes,
+    layout,
+    cursor.selectedNoteId,
+    activeClef,
+    voice2Measures,
+    activeNoteExtras,
+    activeMeasureExtras,
+  ]);
 
   // 帧同步游标控制（与音频调度完全解耦）
   useEffect(() => {
@@ -134,6 +172,18 @@ export function ScoreCanvas() {
       return;
     }
     const target = e.target as Element | null;
+    const v2El = target?.closest('[data-v2-note-id]');
+    if (v2El) {
+      const v2Id = v2El.getAttribute('data-v2-note-id');
+      const mIdxStr = v2El.getAttribute('data-measure-index');
+      if (v2Id) {
+        inputStore.getState().setCursor({
+          measureIndex: mIdxStr ? Number(mIdxStr) : cursor.measureIndex,
+          selectedNoteId: v2Id,
+        });
+        return;
+      }
+    }
     const noteEl = target?.closest('[data-note-id]');
     if (!noteEl) {
       return;

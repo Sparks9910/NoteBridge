@@ -15,6 +15,8 @@ export interface LayoutOptions {
   staffLineHeight?: number;
   jianpuLineHeight?: number;
   lineGap?: number;
+  isGrandStaff?: boolean;
+  hasLyricsOrMarkings?: boolean;
 }
 
 export interface MeasureLayout {
@@ -97,8 +99,12 @@ export function computeScoreLayout(
   );
   const paddingX = options?.paddingX ?? DEFAULT_PADDING_X;
   const paddingTop = options?.paddingTop ?? DEFAULT_PADDING_TOP;
-  const staffHeight = options?.staffLineHeight ?? DEFAULT_STAFF_HEIGHT;
-  const jianpuHeight = options?.jianpuLineHeight ?? DEFAULT_JIANPU_HEIGHT;
+  const staffHeight =
+    options?.staffLineHeight ??
+    (options?.isGrandStaff ? 210 : DEFAULT_STAFF_HEIGHT);
+  const jianpuHeight =
+    options?.jianpuLineHeight ??
+    (options?.hasLyricsOrMarkings ? 96 : DEFAULT_JIANPU_HEIGHT);
   const lineGap = options?.lineGap ?? DEFAULT_LINE_GAP;
   const usableWidth = containerWidth - paddingX * 2;
 

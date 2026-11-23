@@ -25,6 +25,7 @@ import {
   WebAudioEngine,
 } from '../infrastructure/audio-engine.ts';
 import { type InputStoreApi, inputStore } from './input-store.ts';
+import { type NotationStoreApi, notationStore } from './notation-store.ts';
 import { type ScoreStoreApi, scoreStore } from './score-store.ts';
 
 export interface PlaybackSnapshot {
@@ -40,12 +41,14 @@ export interface PlaybackSnapshot {
 export interface PlaybackControllerDeps {
   scoreStore?: ScoreStoreApi;
   inputStore?: InputStoreApi;
+  notationStore?: NotationStoreApi;
   audioEngine?: AudioEngine;
 }
 
 export class PlaybackController {
   private readonly scoreStore: ScoreStoreApi;
   private readonly inputStore: InputStoreApi;
+  private readonly notationStore: NotationStoreApi;
   private readonly audioEngine: AudioEngine;
   private readonly store: StoreApi<PlaybackSnapshot>;
 
@@ -60,6 +63,7 @@ export class PlaybackController {
   constructor(deps?: PlaybackControllerDeps) {
     this.scoreStore = deps?.scoreStore ?? scoreStore;
     this.inputStore = deps?.inputStore ?? inputStore;
+    this.notationStore = deps?.notationStore ?? notationStore;
     this.audioEngine = deps?.audioEngine ?? new WebAudioEngine();
 
     this.store = createStore<PlaybackSnapshot>(() => ({
@@ -544,6 +548,42 @@ export class PlaybackController {
         startTimeMs: ticksToMs(effectiveStartTick - fromTick, bpm),
         durationMs: ticksToMs(remainingTicks, bpm),
       });
+    }
+
+    // 并行调度 Voice 2（低音声部 / 钢琴左手）音符，保持时间轴同步
+    const nState = this.notationStore.getState();
+    if (nState.boundScoreId === doc.id) {
+      const voice2 = nState.tracks[nState.activeTrackIndex]?.voices[1];
+      if (voice2) {
+        let mStartTick = 0;
+        for (let mIdx = 0; mIdx < doc.measures.length; mIdx += 1) {
+          const v1Measure = doc.measures[mIdx];
+          const v2Measure = voice2.measures[mIdx];
+          const v1Ticks = v1Measure
+            ? v1Measure.notes.reduce((sum, n) => sum + n.durationTicks, 0)
+            : 0;
+          if (v2Measure) {
+            let v2Tick = mStartTick;
+            for (const beat of v2Measure.beats) {
+              const beatEnd = v2Tick + beat.durationTicks;
+              if (!beat.isRest && beatEnd > fromTick) {
+                const effStart = Math.max(fromTick, v2Tick);
+                const remTicks = beatEnd - effStart;
+                for (const pNode of beat.notes) {
+                  scheduledNotes.push({
+                    noteId: beat.id,
+                    midiPitch: pNode.midiPitch,
+                    startTimeMs: ticksToMs(effStart - fromTick, bpm),
+                    durationMs: ticksToMs(remTicks, bpm),
+                  });
+                }
+              }
+              v2Tick = beatEnd;
+            }
+          }
+          mStartTick += v1Ticks;
+        }
+      }
     }
 
     const noteRes = this.audioEngine.scheduleNotes(scheduledNotes);

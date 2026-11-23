@@ -6,10 +6,17 @@ import {
 } from '../domain/v2-serializer.ts';
 import type {
   LibraryScoreEntry,
+  ReferenceAttachment,
   ScoreDocumentV2,
 } from '../domain/v2-types.ts';
 import { appConfig } from './config.ts';
 import type { StorageAdapter } from './storage-adapter.ts';
+
+/** 原谱对照本地附件实体 */
+export interface StoredReferenceFile {
+  meta: ReferenceAttachment;
+  data: Uint8Array;
+}
 
 /**
  * 乐谱库持久化仓库统一异步契约。
@@ -32,6 +39,11 @@ export interface ScoreLibraryRepository {
   exportAllScores(): Promise<Result<ScoreDocumentV2[]>>;
   importScores(docs: ScoreDocumentV2[]): Promise<Result<number>>;
   estimateUsageBytes(): Promise<number>;
+  saveReferenceAttachment?(
+    attachment: StoredReferenceFile
+  ): Promise<Result<ReferenceAttachment>>;
+  getReferenceAttachment?(id: string): Promise<Result<StoredReferenceFile>>;
+  deleteReferenceAttachment?(id: string): Promise<Result<void>>;
 }
 
 interface StoredRecord {
@@ -80,6 +92,7 @@ function cloneV2<T>(value: T): T {
  */
 export class InMemoryLibraryRepository implements ScoreLibraryRepository {
   private readonly records = new Map<string, StoredRecord>();
+  private readonly references = new Map<string, StoredReferenceFile>();
 
   public async init(): Promise<Result<void>> {
     return { ok: true, value: undefined };
@@ -126,6 +139,10 @@ export class InMemoryLibraryRepository implements ScoreLibraryRepository {
   }
 
   public async deleteScore(id: string): Promise<Result<void>> {
+    const existing = this.records.get(id);
+    if (existing?.doc.referenceSource?.id) {
+      this.references.delete(existing.doc.referenceSource.id);
+    }
     this.records.delete(id);
     return { ok: true, value: undefined };
   }
@@ -179,11 +196,57 @@ export class InMemoryLibraryRepository implements ScoreLibraryRepository {
     for (const r of this.records.values()) {
       total += r.byteLength;
     }
+    for (const ref of this.references.values()) {
+      total += ref.data.byteLength;
+    }
     return total;
+  }
+
+  public async saveReferenceAttachment(
+    attachment: StoredReferenceFile
+  ): Promise<Result<ReferenceAttachment>> {
+    const clonedData = new Uint8Array(attachment.data);
+    const meta: ReferenceAttachment = {
+      ...attachment.meta,
+      sizeBytes: clonedData.byteLength,
+    };
+    this.references.set(meta.id, { meta, data: clonedData });
+    return { ok: true, value: { ...meta } };
+  }
+
+  public async getReferenceAttachment(
+    id: string
+  ): Promise<Result<StoredReferenceFile>> {
+    const found = this.references.get(id);
+    if (!found) {
+      return {
+        ok: false,
+        error: createAppError('RESOURCE_NOT_FOUND', '未找到关联的原谱对照附件', 'id'),
+      };
+    }
+    return {
+      ok: true,
+      value: {
+        meta: { ...found.meta },
+        data: new Uint8Array(found.data),
+      },
+    };
+  }
+
+  public async deleteReferenceAttachment(id: string): Promise<Result<void>> {
+    this.references.delete(id);
+    return { ok: true, value: undefined };
   }
 }
 
 const STORE_NAME = 'scores';
+const REF_STORE_NAME = 'references';
+
+interface StoredReferenceRecord {
+  id: string;
+  meta: ReferenceAttachment;
+  data: ArrayBuffer;
+}
 
 function isIdbQuotaError(err: unknown): boolean {
   if (!err || typeof err !== 'object') {
@@ -224,11 +287,14 @@ export class IndexedDbLibraryRepository implements ScoreLibraryRepository {
 
     this.initPromise = new Promise<Result<void>>((resolve) => {
       try {
-        const request = globalThis.indexedDB.open(this.dbName, 1);
+        const request = globalThis.indexedDB.open(this.dbName, 2);
         request.onupgradeneeded = () => {
           const db = request.result;
           if (!db.objectStoreNames.contains(STORE_NAME)) {
             db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+          }
+          if (!db.objectStoreNames.contains(REF_STORE_NAME)) {
+            db.createObjectStore(REF_STORE_NAME, { keyPath: 'id' });
           }
         };
         request.onsuccess = () => {
@@ -293,7 +359,8 @@ export class IndexedDbLibraryRepository implements ScoreLibraryRepository {
 
   private runTransaction<T>(
     mode: IDBTransactionMode,
-    executor: (store: IDBObjectStore) => IDBRequest<T>
+    executor: (store: IDBObjectStore) => IDBRequest<T>,
+    storeName: string = STORE_NAME
   ): Promise<Result<T>> {
     return this.ensureDb().then((dbRes) => {
       if (!dbRes.ok) {
@@ -301,8 +368,8 @@ export class IndexedDbLibraryRepository implements ScoreLibraryRepository {
       }
       return new Promise<Result<T>>((resolve) => {
         try {
-          const tx = dbRes.value.transaction(STORE_NAME, mode);
-          const store = tx.objectStore(STORE_NAME);
+          const tx = dbRes.value.transaction(storeName, mode);
+          const store = tx.objectStore(storeName);
           const req = executor(store);
           req.onsuccess = () => {
             resolve({ ok: true, value: req.result });
@@ -419,6 +486,10 @@ export class IndexedDbLibraryRepository implements ScoreLibraryRepository {
   }
 
   public async deleteScore(id: string): Promise<Result<void>> {
+    const existing = await this.getScore(id);
+    if (existing.ok && existing.value.referenceSource?.id) {
+      await this.deleteReferenceAttachment(existing.value.referenceSource.id);
+    }
     const res = await this.runTransaction<undefined>('readwrite', (store) =>
       store.delete(id) as IDBRequest<undefined>
     );
@@ -498,14 +569,85 @@ export class IndexedDbLibraryRepository implements ScoreLibraryRepository {
     const res = await this.runTransaction<StoredRecord[]>('readonly', (store) =>
       store.getAll() as IDBRequest<StoredRecord[]>
     );
-    if (!res.ok) {
-      return 0;
-    }
     let total = 0;
-    for (const r of res.value) {
-      total += r?.byteLength ?? 0;
+    if (res.ok) {
+      for (const r of res.value) {
+        total += r?.byteLength ?? 0;
+      }
+    }
+    const refRes = await this.runTransaction<StoredReferenceRecord[]>(
+      'readonly',
+      (store) => store.getAll() as IDBRequest<StoredReferenceRecord[]>,
+      REF_STORE_NAME
+    );
+    if (refRes.ok) {
+      for (const rf of refRes.value) {
+        total += rf?.meta?.sizeBytes ?? 0;
+      }
     }
     return total;
+  }
+
+  public async saveReferenceAttachment(
+    attachment: StoredReferenceFile
+  ): Promise<Result<ReferenceAttachment>> {
+    const copied = new Uint8Array(attachment.data);
+    const meta: ReferenceAttachment = {
+      ...attachment.meta,
+      sizeBytes: copied.byteLength,
+    };
+    const record: StoredReferenceRecord = {
+      id: meta.id,
+      meta,
+      data: copied.buffer,
+    };
+    const res = await this.runTransaction<IDBValidKey>(
+      'readwrite',
+      (store) => store.put(record),
+      REF_STORE_NAME
+    );
+    if (!res.ok) {
+      return res;
+    }
+    return { ok: true, value: { ...meta } };
+  }
+
+  public async getReferenceAttachment(
+    id: string
+  ): Promise<Result<StoredReferenceFile>> {
+    const res = await this.runTransaction<StoredReferenceRecord | undefined>(
+      'readonly',
+      (store) => store.get(id) as IDBRequest<StoredReferenceRecord | undefined>,
+      REF_STORE_NAME
+    );
+    if (!res.ok) {
+      return res;
+    }
+    if (!res.value || !res.value.meta) {
+      return {
+        ok: false,
+        error: createAppError('RESOURCE_NOT_FOUND', '未在本地仓库找到原谱对照附件', 'id'),
+      };
+    }
+    return {
+      ok: true,
+      value: {
+        meta: { ...res.value.meta },
+        data: new Uint8Array(res.value.data),
+      },
+    };
+  }
+
+  public async deleteReferenceAttachment(id: string): Promise<Result<void>> {
+    const res = await this.runTransaction<undefined>(
+      'readwrite',
+      (store) => store.delete(id) as IDBRequest<undefined>,
+      REF_STORE_NAME
+    );
+    if (!res.ok) {
+      return res;
+    }
+    return { ok: true, value: undefined };
   }
 }
 

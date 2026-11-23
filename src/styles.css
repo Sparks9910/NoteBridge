@@ -978,3 +978,246 @@ body {
   border-top: 1px solid var(--nb-border);
   background: #f8fafc;
 }
+
+/* V2.1 制谱完全体、多标签面板与原谱对照分屏样式 */
+.nb-keypad-tabbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--nb-border);
+  margin-bottom: 8px;
+}
+
+.nb-keypad-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.nb-tab-btn {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--nb-border);
+  border-radius: 6px;
+  background: var(--nb-bg);
+  color: var(--nb-text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.nb-tab-btn.nb-tab-active {
+  background: var(--nb-primary);
+  border-color: var(--nb-primary);
+  color: #ffffff;
+}
+
+.nb-keypad-tabbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nb-voice-pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.nb-voice-pill-v2 {
+  background: #f5f3ff;
+  color: #6d28d9;
+  border-color: #ddd6fe;
+}
+
+.nb-tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.nb-input-compact {
+  width: 160px;
+}
+
+.nb-studio-split {
+  display: grid;
+  grid-template-columns: minmax(280px, 42%) minmax(420px, 1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.nb-reference-pane {
+  background: var(--nb-surface);
+  border: 1px solid var(--nb-border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  min-height: 360px;
+  max-height: 620px;
+  overflow: hidden;
+}
+
+.nb-reference-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--nb-border);
+  background: #f8fafc;
+}
+
+.nb-reference-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nb-reference-title {
+  font-size: 13px;
+}
+
+.nb-reference-badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.nb-reference-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.nb-reference-zoom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nb-ref-zoom-text {
+  font-size: 12px;
+  min-width: 38px;
+  text-align: center;
+}
+
+.nb-reference-body {
+  flex: 1;
+  overflow: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.nb-reference-empty {
+  margin: auto;
+  text-align: center;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--nb-muted);
+}
+
+.nb-ref-img-scroll {
+  width: 100%;
+  overflow: auto;
+  text-align: center;
+}
+
+.nb-ref-img {
+  max-width: none;
+  height: auto;
+  border-radius: 6px;
+  border: 1px solid var(--nb-border);
+}
+
+.nb-ref-pdf {
+  width: 100%;
+  min-height: 460px;
+  border: 1px solid var(--nb-border);
+  border-radius: 6px;
+}
+
+.nb-modal-wide {
+  max-width: 620px;
+}
+
+.nb-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--nb-border);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  resize: vertical;
+  color: var(--nb-text);
+  background: var(--nb-surface);
+}
+
+.nb-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nb-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.nb-export-interop-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.nb-part-extract-box {
+  padding: 10px;
+  border: 1px solid var(--nb-border);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.nb-part-track-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.nb-part-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.nb-voice2-note {
+  opacity: 0.88;
+}
+
+@media (max-width: 900px) {
+  .nb-studio-split {
+    grid-template-columns: 1fr;
+  }
+}

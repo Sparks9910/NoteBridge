@@ -1,10 +1,10 @@
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import { createRequestId } from '../domain/state-machines.ts';
+import { createAppError, createRequestId } from '../domain/state-machines.ts';
 import type { Result, ScoreDocument } from '../domain/types.ts';
+import { parseJianpuTextToScoreV2 } from '../domain/v2-jianpu-text.ts';
 import {
   deserializeLibraryBackup,
-  migrateV1ToV2,
   projectV2ToV1,
   serializeLibraryBackup,
   serializeScoreDocumentV2,
@@ -12,14 +12,17 @@ import {
 import type {
   AppError,
   LibraryScoreEntry,
+  ReferenceAttachment,
   ScoreDocumentV2,
   ScoreMetadata,
   WorkMode,
 } from '../domain/v2-types.ts';
+import { importScoreFromFileData } from '../infrastructure/codecs/codec-registry.ts';
 import {
   createLibraryRepository,
   migrateLegacyLocalStorageToLibrary,
   type ScoreLibraryRepository,
+  type StoredReferenceFile,
 } from '../infrastructure/indexeddb-adapter.ts';
 import {
   createStorageAdapter,
@@ -27,6 +30,7 @@ import {
 } from '../infrastructure/storage-adapter.ts';
 import { buildThumbnailSvg } from '../rendering/export-renderer.ts';
 import { inputStore, type InputStoreApi } from './input-store.ts';
+import { notationStore, type NotationStoreApi } from './notation-store.ts';
 import { scoreStore, type ScoreStoreApi } from './score-store.ts';
 import {
   workspaceStore,
@@ -39,9 +43,21 @@ export interface LibraryStoreDeps {
   scoreStore?: ScoreStoreApi;
   workspaceStore?: WorkspaceStoreApi;
   inputStore?: InputStoreApi;
+  notationStore?: NotationStoreApi;
   now?: () => number;
   idGenerator?: (prefix: string) => string;
 }
+
+const MAX_REFERENCE_BYTES = 20 * 1024 * 1024;
+const ALLOWED_REFERENCE_MIMES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/webp',
+  'image/gif',
+  'image/svg+xml',
+  'application/pdf',
+]);
 
 export interface LibraryStoreState {
   entries: LibraryScoreEntry[];
@@ -71,6 +87,29 @@ export interface LibraryStoreState {
   ) => Result<string>;
   exportAllBackupJson: () => Promise<Result<string>>;
   importBackupJson: (rawText: string) => Promise<Result<number>>;
+  importExternalScore: (
+    v2Doc: ScoreDocumentV2,
+    openImmediately?: boolean
+  ) => Promise<Result<ScoreDocumentV2>>;
+  importExternalFile: (
+    filename: string,
+    bytes: Uint8Array,
+    openImmediately?: boolean
+  ) => Promise<Result<ScoreDocumentV2[]>>;
+  importJianpuText: (
+    text: string,
+    openImmediately?: boolean
+  ) => Promise<Result<ScoreDocumentV2>>;
+  saveScoreReference: (
+    doc: ScoreDocument,
+    meta: ScoreMetadata | undefined,
+    file: { name: string; mimeType: string; data: Uint8Array }
+  ) => Promise<Result<ReferenceAttachment>>;
+  loadScoreReference: (id: string) => Promise<Result<StoredReferenceFile>>;
+  removeScoreReference: (
+    doc: ScoreDocument,
+    meta?: ScoreMetadata
+  ) => Promise<Result<void>>;
   clearError: () => void;
 }
 
@@ -86,6 +125,7 @@ export function createLibraryStore(deps?: LibraryStoreDeps): LibraryStoreApi {
   const targetScoreStore = deps?.scoreStore ?? scoreStore;
   const targetWorkspaceStore = deps?.workspaceStore ?? workspaceStore;
   const targetInputStore = deps?.inputStore ?? inputStore;
+  const targetNotationStore = deps?.notationStore ?? notationStore;
   const now = deps?.now ?? (() => Date.now());
   const idGen = deps?.idGenerator ?? defaultIdGenerator;
 
@@ -135,6 +175,21 @@ export function createLibraryStore(deps?: LibraryStoreDeps): LibraryStoreApi {
           return listRes;
         }
 
+        const currentDocId = targetScoreStore.getState().document.id;
+        if (targetNotationStore.getState().boundScoreId === null) {
+          const currentSaved = await repository.getScore(currentDocId);
+          if (currentSaved.ok) {
+            targetNotationStore.getState().loadFromV2Document(currentSaved.value);
+            targetWorkspaceStore.getState().resetActiveMeta({
+              subtitle: currentSaved.value.subtitle,
+              composer: currentSaved.value.composer,
+              lyricist: currentSaved.value.lyricist,
+            });
+          } else {
+            targetNotationStore.getState().bindScoreId(currentDocId);
+          }
+        }
+
         set({
           entries: listRes.value,
           storageUsageBytes: usageBytes,
@@ -170,7 +225,8 @@ export function createLibraryStore(deps?: LibraryStoreDeps): LibraryStoreApi {
 
     syncScoreToLibrary: async (doc, meta) => {
       await get().initialize();
-      const v2Doc = migrateV1ToV2(doc, meta);
+      targetNotationStore.getState().bindScoreId(doc.id);
+      const v2Doc = targetNotationStore.getState().buildV2Document(doc, meta);
       const thumb = buildThumbnailSvg(doc);
       const saveRes = await repository.saveScore(v2Doc, thumb);
       if (!saveRes.ok) {
@@ -191,6 +247,7 @@ export function createLibraryStore(deps?: LibraryStoreDeps): LibraryStoreApi {
       const v2Doc = res.value;
       const v1Doc = projectV2ToV1(v2Doc);
       targetScoreStore.getState().loadExternalDocument(v1Doc);
+      targetNotationStore.getState().loadFromV2Document(v2Doc);
       targetWorkspaceStore.getState().resetActiveMeta({
         subtitle: v2Doc.subtitle,
         composer: v2Doc.composer,
@@ -217,6 +274,7 @@ export function createLibraryStore(deps?: LibraryStoreDeps): LibraryStoreApi {
       targetWorkspaceStore.getState().resetActiveMeta({});
       targetScoreStore.getState().saveNow();
       const doc = targetScoreStore.getState().document;
+      targetNotationStore.getState().resetForScore(doc.id);
       await get().syncScoreToLibrary(doc, {});
       targetWorkspaceStore.getState().setWorkMode('studio');
       targetWorkspaceStore.getState().setActivePage('studio');
@@ -255,7 +313,7 @@ export function createLibraryStore(deps?: LibraryStoreDeps): LibraryStoreApi {
     },
 
     exportSingleScoreJson: (doc, meta) => {
-      const v2Doc = migrateV1ToV2(doc, meta);
+      const v2Doc = targetNotationStore.getState().buildV2Document(doc, meta);
       return serializeScoreDocumentV2(v2Doc);
     },
 
@@ -295,6 +353,179 @@ export function createLibraryStore(deps?: LibraryStoreDeps): LibraryStoreApi {
 
       await get().refreshList();
       return { ok: true, value: importedCount };
+    },
+
+    importExternalScore: async (v2Doc, openImmediately = true) => {
+      await get().initialize();
+      const normalizedDoc: ScoreDocumentV2 = {
+        ...v2Doc,
+        id: v2Doc.id || idGen('score'),
+        updatedAtEpochMs: Math.trunc(now()),
+      };
+      const thumb = buildThumbnailSvg(projectV2ToV1(normalizedDoc));
+      const saveRes = await repository.saveScore(normalizedDoc, thumb);
+      if (!saveRes.ok) {
+        set({ lastError: saveRes.error });
+        return saveRes;
+      }
+      await get().refreshList();
+
+      if (openImmediately) {
+        const v1Doc = projectV2ToV1(normalizedDoc);
+        targetScoreStore.getState().loadExternalDocument(v1Doc);
+        targetNotationStore.getState().loadFromV2Document(normalizedDoc);
+        targetWorkspaceStore.getState().resetActiveMeta({
+          subtitle: normalizedDoc.subtitle,
+          composer: normalizedDoc.composer,
+          lyricist: normalizedDoc.lyricist,
+        });
+        targetWorkspaceStore.getState().setWorkMode('studio');
+        targetWorkspaceStore.getState().setActivePage('studio');
+        targetInputStore.getState().setCursor({
+          measureIndex: 0,
+          noteIndex: 0,
+          selectedNoteId: null,
+        });
+      }
+
+      set({ lastError: null });
+      return { ok: true, value: normalizedDoc };
+    },
+
+    importExternalFile: async (filename, bytes, openImmediately = true) => {
+      await get().initialize();
+      const parsed = await importScoreFromFileData({
+        filename,
+        bytes,
+        nowMs: Math.trunc(now()),
+      });
+      if (!parsed.ok) {
+        set({ lastError: parsed.error });
+        return parsed;
+      }
+
+      const imported: ScoreDocumentV2[] = [];
+      for (let i = 0; i < parsed.value.length; i += 1) {
+        const item = parsed.value[i]!;
+        const shouldOpen = openImmediately && i === 0;
+        const res = await get().importExternalScore(item, shouldOpen);
+        if (!res.ok) {
+          return res;
+        }
+        imported.push(res.value);
+      }
+
+      set({ lastError: null });
+      return { ok: true, value: imported };
+    },
+
+    importJianpuText: async (text, openImmediately = true) => {
+      await get().initialize();
+      const parsed = parseJianpuTextToScoreV2(text, {
+        nowMs: Math.trunc(now()),
+        id: idGen('jianpu'),
+      });
+      if (!parsed.ok) {
+        set({ lastError: parsed.error });
+        return parsed;
+      }
+      return get().importExternalScore(parsed.value, openImmediately);
+    },
+
+    saveScoreReference: async (doc, meta, file) => {
+      await get().initialize();
+      const mime = file.mimeType.toLowerCase();
+      const lowerName = file.name.toLowerCase();
+      const isAllowedExt = /\.(png|jpe?g|webp|gif|svg|pdf)$/.test(lowerName);
+      if (!ALLOWED_REFERENCE_MIMES.has(mime) && !isAllowedExt) {
+        const err = createAppError(
+          'STORAGE_SCHEMA_CORRUPTED',
+          '原谱对照仅支持 PNG、JPG、WebP、SVG 图片或 PDF 文件'
+        );
+        set({ lastError: err });
+        return { ok: false, error: err };
+      }
+      if (file.data.byteLength > MAX_REFERENCE_BYTES) {
+        const err = createAppError(
+          'STORAGE_QUOTA_EXCEEDED',
+          '原谱文件大小超出 20MB 限制，请压缩后再试'
+        );
+        set({ lastError: err });
+        return { ok: false, error: err };
+      }
+
+      if (!repository.saveReferenceAttachment) {
+        const err = createAppError(
+          'STORAGE_QUOTA_EXCEEDED',
+          '当前存储适配器不支持原谱附件保存'
+        );
+        set({ lastError: err });
+        return { ok: false, error: err };
+      }
+
+      const existingRefId = targetNotationStore.getState().referenceSource?.id;
+      if (existingRefId && repository.deleteReferenceAttachment) {
+        await repository.deleteReferenceAttachment(existingRefId);
+      }
+
+      const refId = idGen('ref');
+      const resolvedMime =
+        mime || (lowerName.endsWith('.pdf') ? 'application/pdf' : 'image/png');
+      const attachmentMeta: ReferenceAttachment = {
+        id: refId,
+        name: file.name || '原谱附件',
+        mimeType: resolvedMime,
+        sizeBytes: file.data.byteLength,
+      };
+      const saveRefRes = await repository.saveReferenceAttachment({
+        meta: attachmentMeta,
+        data: file.data,
+      });
+      if (!saveRefRes.ok) {
+        set({ lastError: saveRefRes.error });
+        return saveRefRes;
+      }
+
+      targetNotationStore.getState().bindScoreId(doc.id);
+      targetNotationStore.getState().setReferenceSource(saveRefRes.value);
+      targetNotationStore.getState().toggleReferencePanel(true);
+
+      const syncRes = await get().syncScoreToLibrary(doc, meta);
+      if (!syncRes.ok) {
+        return syncRes;
+      }
+
+      set({ lastError: null });
+      return saveRefRes;
+    },
+
+    loadScoreReference: async (id) => {
+      await get().initialize();
+      if (!repository.getReferenceAttachment) {
+        return {
+          ok: false,
+          error: createAppError('RESOURCE_NOT_FOUND', '当前存储不支持读取原谱附件'),
+        };
+      }
+      const res = await repository.getReferenceAttachment(id);
+      if (!res.ok) {
+        set({ lastError: res.error });
+      }
+      return res;
+    },
+
+    removeScoreReference: async (doc, meta) => {
+      await get().initialize();
+      const existingRefId = targetNotationStore.getState().referenceSource?.id;
+      if (existingRefId && repository.deleteReferenceAttachment) {
+        await repository.deleteReferenceAttachment(existingRefId);
+      }
+      targetNotationStore.getState().setReferenceSource(null);
+      const syncRes = await get().syncScoreToLibrary(doc, meta);
+      if (!syncRes.ok) {
+        return syncRes;
+      }
+      return { ok: true, value: undefined };
     },
 
     clearError: () => {

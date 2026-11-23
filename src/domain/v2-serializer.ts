@@ -8,6 +8,7 @@ import {
   validateScoreDocument,
 } from './serializer.ts';
 import { resolveNotePitch, VALID_KEY_SIGNATURES } from './theory.ts';
+import { midiToJianpuNoteSpec } from './transpose.ts';
 import type {
   Accidental,
   BaseDuration,
@@ -21,8 +22,11 @@ import type {
 } from './types.ts';
 import type {
   Beat,
+  DynamicMarking,
   InstrumentId,
   LibraryBackupBundle,
+  MeasureBarlineType,
+  OrnamentType,
   PitchNode,
   ScoreDocumentV2,
   ScoreMetadata,
@@ -55,6 +59,85 @@ const VALID_ACCIDENTALS: ReadonlySet<Accidental> = new Set([
 ]);
 const VALID_OCTAVES: ReadonlySet<number> = new Set([-2, -1, 0, 1, 2]);
 const VALID_DEGREES: ReadonlySet<number> = new Set([1, 2, 3, 4, 5, 6, 7]);
+const VALID_DYNAMICS: ReadonlySet<DynamicMarking> = new Set([
+  'pp',
+  'p',
+  'mp',
+  'mf',
+  'f',
+  'ff',
+  'fp',
+]);
+const VALID_ORNAMENTS: ReadonlySet<OrnamentType> = new Set([
+  'trill',
+  'staccato',
+  'accent',
+  'fermata',
+]);
+const VALID_BARLINES: ReadonlySet<MeasureBarlineType> = new Set([
+  'single',
+  'double',
+  'final',
+]);
+
+const DURATION_CANDIDATES: ReadonlyArray<{
+  baseDuration: BaseDuration;
+  dotted: boolean;
+  ticks: number;
+}> = [
+  { baseDuration: 'whole', dotted: false, ticks: 1920 },
+  { baseDuration: 'half', dotted: true, ticks: 1440 },
+  { baseDuration: 'half', dotted: false, ticks: 960 },
+  { baseDuration: 'quarter', dotted: true, ticks: 720 },
+  { baseDuration: 'quarter', dotted: false, ticks: 480 },
+  { baseDuration: 'eighth', dotted: true, ticks: 360 },
+  { baseDuration: 'eighth', dotted: false, ticks: 240 },
+  { baseDuration: 'sixteenth', dotted: true, ticks: 180 },
+  { baseDuration: 'sixteenth', dotted: false, ticks: 120 },
+];
+
+/** 将任意正整数 Ticks 量化为最接近的标准基础时值与附点组合 */
+export function quantizeTicksToDuration(ticks: number): {
+  baseDuration: BaseDuration;
+  dotted: boolean;
+  durationTicks: number;
+} {
+  const safeTicks = Math.max(120, Math.round(ticks));
+  let best = DURATION_CANDIDATES[4]!;
+  let minDiff = Math.abs(safeTicks - best.ticks);
+
+  for (const candidate of DURATION_CANDIDATES) {
+    const diff = Math.abs(safeTicks - candidate.ticks);
+    if (diff < minDiff) {
+      minDiff = diff;
+      best = candidate;
+    }
+  }
+
+  return {
+    baseDuration: best.baseDuration,
+    dotted: best.dotted,
+    durationTicks: calculateDurationTicks(best.baseDuration, best.dotted),
+  };
+}
+
+/** 将 MIDI 绝对音高反解为 V2 PitchNode */
+export function mapMidiToPitchNode(
+  midiPitch: number,
+  keySignature: KeySignature,
+  id: string,
+  preferFlat?: boolean
+): PitchNode {
+  const clampedMidi = Math.max(24, Math.min(108, Math.round(midiPitch)));
+  const spec = midiToJianpuNoteSpec(clampedMidi, keySignature, preferFlat);
+  return {
+    id,
+    midiPitch: clampedMidi,
+    degree: spec.degree,
+    octaveOffset: spec.octaveOffset,
+    accidental: spec.accidental,
+  };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -172,11 +255,15 @@ export function migrateV1ToV2(
   return docV2;
 }
 
-/** 将 V2 主轨主声部无损投影回 P0 v1 视图模型 */
-export function projectV2ToV1(v2: ScoreDocumentV2): ScoreDocument {
-  const firstTrack = v2.tracks[0];
-  const firstVoice = firstTrack?.voices[0];
-  const sourceMeasures = firstVoice?.measures ?? [];
+/** 将 V2 指定轨道与声部无损投影回 P0 v1 视图模型 */
+export function projectTrackVoiceToV1(
+  v2: ScoreDocumentV2,
+  trackIndex = 0,
+  voiceIndex = 0
+): ScoreDocument {
+  const targetTrack = v2.tracks[trackIndex] ?? v2.tracks[0];
+  const targetVoice = targetTrack?.voices[voiceIndex] ?? targetTrack?.voices[0];
+  const sourceMeasures = targetVoice?.measures ?? [];
 
   const measures: Measure[] = sourceMeasures.map((m, idx) => {
     const notes: NoteEvent[] = m.beats.map((beat) => {
@@ -230,6 +317,118 @@ export function projectV2ToV1(v2: ScoreDocumentV2): ScoreDocument {
     viewMode: v2.viewMode,
     measures,
     updatedAtEpochMs: v2.updatedAtEpochMs,
+  };
+}
+
+/** 将 V2 主轨主声部无损投影回 P0 v1 视图模型 */
+export function projectV2ToV1(v2: ScoreDocumentV2): ScoreDocument {
+  return projectTrackVoiceToV1(v2, 0, 0);
+}
+
+/** 从多轨 V2 乐谱提取选定轨道生成独立分谱 */
+export function extractPartsFromScoreV2(
+  v2: ScoreDocumentV2,
+  trackIds: readonly string[]
+): Result<ScoreDocumentV2> {
+  const idSet = new Set(trackIds);
+  const selectedTracks = v2.tracks
+    .filter((t) => idSet.has(t.id))
+    .map((t) => ({
+      ...t,
+      enabledViews: [...t.enabledViews],
+      voices: t.voices.map((v) => ({
+        ...v,
+        measures: v.measures.map((m) => ({
+          ...m,
+          beats: m.beats.map((b) => ({
+            ...b,
+            notes: b.notes.map((n) => ({ ...n })),
+          })),
+        })),
+      })),
+    }));
+
+  if (selectedTracks.length === 0) {
+    return {
+      ok: false,
+      error: createAppError(
+        'RESOURCE_NOT_FOUND',
+        '未找到勾选的分谱轨道，请至少保留一条有效轨道',
+        'trackIds'
+      ),
+    };
+  }
+
+  const partLabel =
+    selectedTracks.length === 1
+      ? `${selectedTracks[0]!.name}分谱`
+      : `分谱（${selectedTracks.map((t) => t.name).join(' + ')}）`;
+
+  return {
+    ok: true,
+    value: {
+      ...v2,
+      id: `${v2.id}_part`,
+      title: `${v2.title} - ${partLabel}`,
+      tracks: selectedTracks,
+    },
+  };
+}
+
+/** 从指定轨道中提取单个声部作为独立分谱（例如钢琴右手 Voice 1 或左手 Voice 2） */
+export function extractVoiceAsPartV2(
+  v2: ScoreDocumentV2,
+  trackId: string,
+  voiceIndex: number
+): Result<ScoreDocumentV2> {
+  const track = v2.tracks.find((t) => t.id === trackId);
+  if (!track) {
+    return {
+      ok: false,
+      error: createAppError('RESOURCE_NOT_FOUND', '未找到指定分谱轨道', 'trackId'),
+    };
+  }
+  const voice = track.voices[voiceIndex];
+  if (!voice) {
+    return {
+      ok: false,
+      error: createAppError(
+        'RESOURCE_NOT_FOUND',
+        `轨道「${track.name}」中不存在第 ${voiceIndex + 1} 声部`,
+        'voiceIndex'
+      ),
+    };
+  }
+
+  const voiceLabel = voiceIndex === 0 ? '高音/右手声部' : `第 ${voiceIndex + 1} 声部`;
+  const clonedTrack: Track = {
+    ...track,
+    name: `${track.name}（${voiceLabel}）`,
+    clef: voiceIndex === 1 && track.clef === 'grand' ? 'bass' : track.clef === 'grand' ? 'treble' : track.clef,
+    enabledViews: [...track.enabledViews],
+    voices: [
+      {
+        ...voice,
+        index: 0,
+        measures: voice.measures.map((m) => ({
+          ...m,
+          beats: m.beats.map((b) => ({
+            ...b,
+            notes: b.notes.map((n) => ({ ...n })),
+          })),
+        })),
+      },
+    ],
+  };
+
+  return {
+    ok: true,
+    value: {
+      ...v2,
+      id: `${v2.id}_part_v${voiceIndex + 1}`,
+      title: `${v2.title} - ${clonedTrack.name}`,
+      tracks: [clonedTrack],
+    },
   };
 }
 
@@ -362,6 +561,44 @@ function validateBeat(raw: unknown, path: string): Result<Beat> {
   if (typeof raw.chordSymbol === 'string') {
     beat.chordSymbol = raw.chordSymbol;
   }
+  if (
+    typeof raw.dynamic === 'string' &&
+    VALID_DYNAMICS.has(raw.dynamic as DynamicMarking)
+  ) {
+    beat.dynamic = raw.dynamic as DynamicMarking;
+  }
+  if (
+    typeof raw.ornament === 'string' &&
+    VALID_ORNAMENTS.has(raw.ornament as OrnamentType)
+  ) {
+    beat.ornament = raw.ornament as OrnamentType;
+  }
+  if (typeof raw.tieStart === 'boolean') {
+    beat.tieStart = raw.tieStart;
+  }
+  if (typeof raw.tieEnd === 'boolean') {
+    beat.tieEnd = raw.tieEnd;
+  }
+  if (typeof raw.slurStart === 'boolean') {
+    beat.slurStart = raw.slurStart;
+  }
+  if (typeof raw.slurEnd === 'boolean') {
+    beat.slurEnd = raw.slurEnd;
+  }
+  if (
+    isRecord(raw.tuplet) &&
+    typeof raw.tuplet.actual === 'number' &&
+    Number.isInteger(raw.tuplet.actual) &&
+    raw.tuplet.actual > 1 &&
+    typeof raw.tuplet.normal === 'number' &&
+    Number.isInteger(raw.tuplet.normal) &&
+    raw.tuplet.normal > 0
+  ) {
+    beat.tuplet = {
+      actual: raw.tuplet.actual,
+      normal: raw.tuplet.normal,
+    };
+  }
 
   return { ok: true, value: beat };
 }
@@ -389,13 +626,30 @@ function validateV2Measure(raw: unknown, path: string): Result<V2Measure> {
     beats.push(bRes.value);
   }
 
+  const measure: V2Measure = {
+    id: raw.id,
+    index: raw.index,
+    beats,
+  };
+  if (typeof raw.repeatStart === 'boolean') {
+    measure.repeatStart = raw.repeatStart;
+  }
+  if (typeof raw.repeatEnd === 'boolean') {
+    measure.repeatEnd = raw.repeatEnd;
+  }
+  if (
+    typeof raw.barline === 'string' &&
+    VALID_BARLINES.has(raw.barline as MeasureBarlineType)
+  ) {
+    measure.barline = raw.barline as MeasureBarlineType;
+  }
+  if (raw.ending === 1 || raw.ending === 2) {
+    measure.ending = raw.ending;
+  }
+
   return {
     ok: true,
-    value: {
-      id: raw.id,
-      index: raw.index,
-      beats,
-    },
+    value: measure,
   };
 }
 

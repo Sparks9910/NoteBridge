@@ -1,6 +1,7 @@
 import { type ChangeEvent, useState } from 'react';
 import { inputStore } from '../application/input-store.ts';
 import { libraryStore } from '../application/library-store.ts';
+import { notationStore, useNotationStore } from '../application/notation-store.ts';
 import {
   playbackController,
   usePlaybackStore,
@@ -22,6 +23,7 @@ import type {
   ViewMode,
 } from '../domain/types.ts';
 import { ExportModal } from './ExportModal.tsx';
+import { ImportModal } from './ImportModal.tsx';
 import { TransposeModal } from './TransposeModal.tsx';
 
 const SAVE_STATUS_LABELS: Record<DocumentState, string> = {
@@ -55,10 +57,13 @@ export function Toolbar() {
 
   const playbackState = usePlaybackStore((s) => s.playbackState);
   const workMode = useWorkspaceStore((s) => s.workMode);
+  const showReferencePanel = useNotationStore((s) => s.showReferencePanel);
+  const referenceSource = useNotationStore((s) => s.referenceSource);
   const isLocked = playbackState !== 'IDLE' && playbackState !== 'ERROR';
 
   const [isTransposeOpen, setIsTransposeOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
 
   const handleOpenLibrary = () => {
     if (isLocked) {
@@ -94,7 +99,10 @@ export function Toolbar() {
     if (isLocked) {
       return;
     }
-    scoreStore.getState().createNewScore();
+    const res = scoreStore.getState().createNewScore();
+    if (res.ok) {
+      notationStore.getState().resetForScore(res.value.id);
+    }
     inputStore.getState().setCursor({
       measureIndex: 0,
       noteIndex: 0,
@@ -108,6 +116,7 @@ export function Toolbar() {
     }
     const res = scoreStore.getState().loadDemoScore();
     if (res.ok) {
+      notationStore.getState().resetForScore(res.value.id);
       inputStore.getState().setCursor({
         measureIndex: 0,
         noteIndex: 0,
@@ -293,6 +302,25 @@ export function Toolbar() {
           <button
             type="button"
             className="nb-btn"
+            data-testid="btn-open-import"
+            disabled={isLocked}
+            onClick={() => setIsImportOpen(true)}
+          >
+            导入
+          </button>
+          <button
+            type="button"
+            className={`nb-btn ${showReferencePanel ? 'nb-btn-active' : ''}`}
+            data-testid="btn-toggle-reference"
+            aria-pressed={showReferencePanel}
+            disabled={workMode !== 'studio'}
+            onClick={() => notationStore.getState().toggleReferencePanel()}
+          >
+            {referenceSource ? '原谱对照 •' : '原谱对照'}
+          </button>
+          <button
+            type="button"
+            className="nb-btn"
             data-testid="btn-open-transpose"
             disabled={isLocked}
             onClick={() => setIsTransposeOpen(true)}
@@ -363,6 +391,10 @@ export function Toolbar() {
       <ExportModal
         isOpen={isExportOpen}
         onClose={() => setIsExportOpen(false)}
+      />
+      <ImportModal
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
       />
     </header>
   );

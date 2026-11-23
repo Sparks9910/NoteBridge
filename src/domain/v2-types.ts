@@ -30,6 +30,39 @@ export type WorkMode = 'studio' | 'practice';
 /** V2 画布视图图层类型 */
 export type ViewLayerType = 'staff' | 'jianpu' | 'tab';
 
+/** V2.1 强弱记号 */
+export type DynamicMarking = 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff' | 'fp';
+
+/** V2.1 常见演奏与装饰记号 */
+export type OrnamentType = 'trill' | 'staccato' | 'accent' | 'fermata';
+
+/** V2.1 小节线类型 */
+export type MeasureBarlineType = 'single' | 'double' | 'final';
+
+/** V2.1 支持导入的外部格式 */
+export type ImportFormat = 'musicxml' | 'mxl' | 'midi' | 'jianpu-text' | 'json';
+
+/** V2.1 音符/节拍扩展排版记号（供应用层与渲染层共享） */
+export interface NoteNotationExtra {
+  lyric?: string;
+  fingering?: string;
+  dynamic?: DynamicMarking;
+  ornament?: OrnamentType;
+  tieStart?: boolean;
+  tieEnd?: boolean;
+  slurStart?: boolean;
+  slurEnd?: boolean;
+  chordSymbol?: string;
+}
+
+/** V2.1 小节扩展排版记号（反复记号、跳房子、小节线） */
+export interface MeasureNotationExtra {
+  repeatStart?: boolean;
+  repeatEnd?: boolean;
+  barline?: MeasureBarlineType;
+  ending?: 1 | 2;
+}
+
 /** V2 预设乐器标识 */
 export type InstrumentId =
   | 'piano'
@@ -70,10 +103,17 @@ export interface Beat {
   isRest: boolean;
   baseDuration: BaseDuration;
   dotted: boolean;
+  tuplet?: { actual: number; normal: number };
   durationTicks: number;
   notes: PitchNode[];
   lyric?: string;
   chordSymbol?: string;
+  dynamic?: DynamicMarking;
+  ornament?: OrnamentType;
+  tieStart?: boolean;
+  tieEnd?: boolean;
+  slurStart?: boolean;
+  slurEnd?: boolean;
 }
 
 /** V2 小节 */
@@ -81,6 +121,10 @@ export interface V2Measure {
   id: string;
   index: number;
   beats: Beat[];
+  repeatStart?: boolean;
+  repeatEnd?: boolean;
+  barline?: MeasureBarlineType;
+  ending?: 1 | 2;
 }
 
 /** V2 声部 */

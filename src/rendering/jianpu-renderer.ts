@@ -6,6 +6,10 @@ import type {
   ResolvedNote,
   ScoreDocument,
 } from '../domain/types.ts';
+import type {
+  MeasureNotationExtra,
+  NoteNotationExtra,
+} from '../domain/v2-types.ts';
 import type { ScoreLayout } from './layout-engine.ts';
 
 export interface JianpuNoteViewModel {
@@ -54,6 +58,8 @@ export interface JianpuRenderModel {
 export interface JianpuRenderOptions {
   activeNoteId?: string | null;
   selectedNoteId?: string | null;
+  noteExtrasById?: Readonly<Record<string, NoteNotationExtra>>;
+  measureExtrasByIndex?: Readonly<Record<number, MeasureNotationExtra>>;
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -233,7 +239,11 @@ export function renderJianpu(
     svg.appendChild(header);
   }
 
+  let openTie: { x: number; y: number } | null = null;
+  let openSlur: { x: number; y: number } | null = null;
+
   for (const m of model.measures) {
+    const mExtra = options?.measureExtrasByIndex?.[m.measureIndex];
     if (m.isOverflow) {
       svg.appendChild(
         createSvgElement('rect', {
@@ -250,8 +260,46 @@ export function renderJianpu(
       );
     }
 
-    // 小节右侧纵线（末小节使用双纵线）
+    if (mExtra?.repeatStart) {
+      svg.appendChild(
+        createSvgElement('line', {
+          x1: m.x + 2,
+          y1: m.y + 16,
+          x2: m.x + 2,
+          y2: m.y + 52,
+          stroke: '#0f172a',
+          'stroke-width': 2.5,
+        })
+      );
+      svg.appendChild(
+        createSvgElement('line', {
+          x1: m.x + 6,
+          y1: m.y + 16,
+          x2: m.x + 6,
+          y2: m.y + 52,
+          stroke: '#0f172a',
+          'stroke-width': 1,
+        })
+      );
+      svg.appendChild(createSvgElement('circle', { cx: m.x + 10, cy: m.y + 28, r: 1.6, fill: '#0f172a' }));
+      svg.appendChild(createSvgElement('circle', { cx: m.x + 10, cy: m.y + 39, r: 1.6, fill: '#0f172a' }));
+    }
+
+    if (mExtra?.ending) {
+      const endingText = createSvgElement('text', {
+        x: m.x + 16,
+        y: m.y + 14,
+        'font-size': 10,
+        'font-weight': 700,
+        fill: '#0f172a',
+      });
+      endingText.textContent = `${mExtra.ending}.`;
+      svg.appendChild(endingText);
+    }
+
+    // 小节右侧纵线（末小节或反复结束线）
     const barLineX = m.x + m.width;
+    const isDoubleOrFinal = m.isLastMeasure || mExtra?.repeatEnd || mExtra?.barline === 'double' || mExtra?.barline === 'final';
     svg.appendChild(
       createSvgElement('line', {
         x1: barLineX,
@@ -259,10 +307,10 @@ export function renderJianpu(
         x2: barLineX,
         y2: m.y + 52,
         stroke: '#64748b',
-        'stroke-width': m.isLastMeasure ? 2.5 : 1.2,
+        'stroke-width': m.isLastMeasure || mExtra?.repeatEnd || mExtra?.barline === 'final' ? 2.5 : 1.2,
       })
     );
-    if (m.isLastMeasure) {
+    if (isDoubleOrFinal) {
       svg.appendChild(
         createSvgElement('line', {
           x1: barLineX - 4,
@@ -273,6 +321,10 @@ export function renderJianpu(
           'stroke-width': 1,
         })
       );
+      if (mExtra?.repeatEnd) {
+        svg.appendChild(createSvgElement('circle', { cx: barLineX - 8, cy: m.y + 28, r: 1.6, fill: '#0f172a' }));
+        svg.appendChild(createSvgElement('circle', { cx: barLineX - 8, cy: m.y + 39, r: 1.6, fill: '#0f172a' }));
+      }
     }
 
     // 减时线连杠
@@ -409,6 +461,114 @@ export function renderJianpu(
               fill: '#0f172a',
             })
           );
+        }
+      }
+
+      const extra = options?.noteExtrasById?.[noteVm.noteId];
+      if (extra) {
+        if (extra.fingering) {
+          const fg = createSvgElement('text', {
+            x: noteVm.x,
+            y: noteVm.y - 24 - Math.max(0, noteVm.octaveOffset) * 5,
+            'text-anchor': 'middle',
+            'font-size': 10,
+            'font-weight': 700,
+            fill: '#2563eb',
+            'data-jianpu-fingering': noteVm.noteId,
+          });
+          fg.textContent = extra.fingering;
+          group.appendChild(fg);
+        }
+
+        if (extra.ornament) {
+          const ornLabel =
+            extra.ornament === 'trill'
+              ? 'tr'
+              : extra.ornament === 'staccato'
+                ? '•'
+                : extra.ornament === 'accent'
+                  ? '>'
+                  : '𝄐';
+          const ornEl = createSvgElement('text', {
+            x: noteVm.x + 9,
+            y: noteVm.y - 16,
+            'text-anchor': 'middle',
+            'font-size': 10,
+            'font-weight': 700,
+            fill: '#0f172a',
+            'data-jianpu-ornament': noteVm.noteId,
+          });
+          ornEl.textContent = ornLabel;
+          group.appendChild(ornEl);
+        }
+
+        if (extra.dynamic) {
+          const dynEl = createSvgElement('text', {
+            x: noteVm.x - 10,
+            y: noteVm.y + 16,
+            'text-anchor': 'end',
+            'font-size': 10,
+            'font-style': 'italic',
+            'font-weight': 700,
+            fill: '#475569',
+            'data-jianpu-dynamic': noteVm.noteId,
+          });
+          dynEl.textContent = extra.dynamic;
+          group.appendChild(dynEl);
+        }
+
+        if (extra.lyric && extra.lyric.trim().length > 0) {
+          const lyricY =
+            noteVm.y +
+            22 +
+            noteVm.underlineCount * 4 +
+            Math.max(0, -noteVm.octaveOffset) * 5;
+          const lyricEl = createSvgElement('text', {
+            x: noteVm.x,
+            y: lyricY,
+            'text-anchor': 'middle',
+            'font-size': 12,
+            fill: '#1e293b',
+            'data-jianpu-lyric': noteVm.noteId,
+          });
+          lyricEl.textContent = extra.lyric.trim();
+          group.appendChild(lyricEl);
+        }
+
+        if (extra.tieEnd && openTie) {
+          const midX = (openTie.x + noteVm.x) / 2;
+          const arcY = noteVm.y - 14;
+          svg.appendChild(
+            createSvgElement('path', {
+              d: `M ${openTie.x + 3} ${arcY} Q ${midX} ${arcY - 10} ${noteVm.x - 3} ${arcY}`,
+              fill: 'none',
+              stroke: '#0f172a',
+              'stroke-width': 1.2,
+              'data-jianpu-tie': noteVm.noteId,
+            })
+          );
+          openTie = null;
+        }
+        if (extra.tieStart) {
+          openTie = { x: noteVm.x, y: noteVm.y };
+        }
+
+        if (extra.slurEnd && openSlur) {
+          const midX = (openSlur.x + noteVm.x) / 2;
+          const arcY = noteVm.y - 16;
+          svg.appendChild(
+            createSvgElement('path', {
+              d: `M ${openSlur.x} ${arcY} Q ${midX} ${arcY - 12} ${noteVm.x} ${arcY}`,
+              fill: 'none',
+              stroke: '#2563eb',
+              'stroke-width': 1.2,
+              'data-jianpu-slur': noteVm.noteId,
+            })
+          );
+          openSlur = null;
+        }
+        if (extra.slurStart) {
+          openSlur = { x: noteVm.x, y: noteVm.y };
         }
       }
 

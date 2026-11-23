@@ -1,6 +1,12 @@
 import { createAppError } from '../domain/state-machines.ts';
 import { resolveScoreNotes } from '../domain/theory.ts';
 import type { ResolvedNote, Result, ScoreDocument } from '../domain/types.ts';
+import type {
+  MeasureNotationExtra,
+  NoteNotationExtra,
+  Track,
+  V2Measure,
+} from '../domain/v2-types.ts';
 import {
   buildA4PdfFromJpegPages,
   dataUrlToUint8Array,
@@ -16,9 +22,17 @@ export interface ScorePrintMeta {
   lyricist?: string;
 }
 
+export interface ScoreNotationPrintContext {
+  clef?: Track['clef'];
+  voice2Measures?: readonly V2Measure[];
+  noteExtrasById?: Readonly<Record<string, NoteNotationExtra>>;
+  measureExtrasByIndex?: Readonly<Record<number, MeasureNotationExtra>>;
+}
+
 export interface PrintablePageOptions {
   pageWidthPx?: number;
   pageHeightPx?: number;
+  notation?: ScoreNotationPrintContext;
 }
 
 const DEFAULT_PAGE_WIDTH_PX = 860;
@@ -216,10 +230,17 @@ export function renderPrintablePageSvgs(
 
   const pageWidthPx = options?.pageWidthPx ?? DEFAULT_PAGE_WIDTH_PX;
   const pageHeightPx = options?.pageHeightPx ?? DEFAULT_PAGE_HEIGHT_PX;
+  const notation = options?.notation;
 
   const resolvedNotes = resolveScoreNotes(doc);
-  const staffLineHeight = doc.viewMode === 'jianpu' ? 0 : 110;
-  const jianpuLineHeight = doc.viewMode === 'staff' ? 0 : 76;
+  const isGrand = notation?.clef === 'grand';
+  const hasLyricsOrMarkings = Boolean(
+    notation?.noteExtrasById && Object.keys(notation.noteExtrasById).length > 0
+  );
+  const staffLineHeight =
+    doc.viewMode === 'jianpu' ? 0 : isGrand ? 210 : 110;
+  const jianpuLineHeight =
+    doc.viewMode === 'staff' ? 0 : hasLyricsOrMarkings ? 96 : 76;
 
   const layout = computeScoreLayout(doc, resolvedNotes, {
     containerWidth: pageWidthPx,
@@ -235,11 +256,19 @@ export function renderPrintablePageSvgs(
   const staffSvg =
     doc.viewMode === 'jianpu'
       ? null
-      : renderStaff(staffHost, doc, resolvedNotes, layout);
+      : renderStaff(staffHost, doc, resolvedNotes, layout, {
+          clef: notation?.clef,
+          voice2Measures: notation?.voice2Measures,
+          noteExtrasById: notation?.noteExtrasById,
+          measureExtrasByIndex: notation?.measureExtrasByIndex,
+        });
   const jianpuSvg =
     doc.viewMode === 'staff'
       ? null
-      : renderJianpu(jianpuHost, doc, resolvedNotes, layout);
+      : renderJianpu(jianpuHost, doc, resolvedNotes, layout, {
+          noteExtrasById: notation?.noteExtrasById,
+          measureExtrasByIndex: notation?.measureExtrasByIndex,
+        });
 
   const staffInner = serializeSvgInnerContent(staffSvg);
   const jianpuInner = serializeSvgInnerContent(jianpuSvg);
@@ -330,12 +359,19 @@ function parseSvgSize(svgStr: string): { width: number; height: number } {
 /** 导出完整无水印高清 PNG 长图 */
 export async function exportScoreToPngBlob(
   doc: ScoreDocument,
-  meta?: ScorePrintMeta
+  meta?: ScorePrintMeta,
+  notation?: ScoreNotationPrintContext
 ): Promise<Result<Blob>> {
   try {
     const resolvedNotes = resolveScoreNotes(doc);
-    const staffLineHeight = doc.viewMode === 'jianpu' ? 0 : 110;
-    const jianpuLineHeight = doc.viewMode === 'staff' ? 0 : 76;
+    const isGrand = notation?.clef === 'grand';
+    const hasLyricsOrMarkings = Boolean(
+      notation?.noteExtrasById && Object.keys(notation.noteExtrasById).length > 0
+    );
+    const staffLineHeight =
+      doc.viewMode === 'jianpu' ? 0 : isGrand ? 210 : 110;
+    const jianpuLineHeight =
+      doc.viewMode === 'staff' ? 0 : hasLyricsOrMarkings ? 96 : 76;
     const layout = computeScoreLayout(doc, resolvedNotes, {
       containerWidth: DEFAULT_PAGE_WIDTH_PX,
       staffLineHeight,
@@ -351,6 +387,7 @@ export async function exportScoreToPngBlob(
     const pages = renderPrintablePageSvgs(doc, meta, {
       pageWidthPx: DEFAULT_PAGE_WIDTH_PX,
       pageHeightPx: fullHeight,
+      notation,
     });
     const firstSvg = pages[0];
     if (!firstSvg) {
@@ -392,12 +429,14 @@ export async function exportScoreToPngBlob(
 /** 导出无水印 A4 分页高清 PDF */
 export async function exportScoreToPdfBlob(
   doc: ScoreDocument,
-  meta?: ScorePrintMeta
+  meta?: ScorePrintMeta,
+  notation?: ScoreNotationPrintContext
 ): Promise<Result<Blob>> {
   try {
     const pageSvgs = renderPrintablePageSvgs(doc, meta, {
       pageWidthPx: DEFAULT_PAGE_WIDTH_PX,
       pageHeightPx: DEFAULT_PAGE_HEIGHT_PX,
+      notation,
     });
 
     const pdfPages: PdfJpegPage[] = [];
