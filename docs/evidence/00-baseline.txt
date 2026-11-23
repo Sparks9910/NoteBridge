@@ -1,0 +1,78 @@
+NoteBridge（音桥）第 3 步 · 环境与基线实测证据
+========================================================================
+核验日期：2026-11-23
+核验对象：NoteBridge 工程脚手架、GATE-0 共享契约与配置校验、L0 基准命令
+基线提交：main @ e2ceb5c（含第 1-3 步未提交工作区改动）
+
+一、实测环境表
+------------------------------------------------------------------------
+- 操作系统：Microsoft Windows [Version 10.0.26200.9974]
+- Node.js：v24.15.0
+- npm：11.12.1
+- 工程形态：TypeScript + React + Vite + Vitest 纯前端本地优先 SPA
+- 已知平台限制（未试图修复或绕过）：
+  1. 沙盒中 pnpm --version 报 EPERM -> 统一使用 npm，禁止 pnpm/yarn
+  2. Docker 守护进程不可达（//./pipe/docker_engine）-> 不使用容器命令
+  3. 沙盒中跨盘 git -C 可能报 Permission denied -> 在工作区内直接执行 git
+  4. 无物理声卡人工监听通道 -> 音频主观听感属 L7 人工真机未验收项
+
+二、基线用例与脚本统计
+------------------------------------------------------------------------
+- L0 TypeScript 类型检查（npm run typecheck）：退出码 0（通过）
+- L0 Vite 生产构建（npm run build）：退出码 0（通过，生成 dist/index.html 与 dist/assets/index-DetIz8OD.js）
+- L0 配置与生产门禁单测（npm run test:config）：退出码 0（1 个测试文件，9 passed / 0 failed / 0 skipped）
+- 一键冒烟自检（npm run smoke）：退出码 0（5 passed / 0 failed）
+- L1-L6 其余脚本入口（test:unit / test:service / test:contract / test:e2e:mock / test:browser / test:nonfunc）：已在 package.json 配置入口，对应测试文件待第 4-6 步补充，本轮未执行
+
+三、四条基准命令实测输出
+------------------------------------------------------------------------
+[1] npm run typecheck
+退出码：0
+输出：
+> notebridge@0.1.0 typecheck
+> tsc --noEmit
+
+[2] npm run build
+退出码：0
+输出：
+> notebridge@0.1.0 build
+> vite build
+
+vite v8.3.8 building client environment for production...
+transforming...
+✓ 15 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                  0.33 kB │ gzip:  0.25 kB
+dist/assets/index-DetIz8OD.js  219.71 kB │ gzip: 68.77 kB
+
+✓ built in 245ms
+
+[3] npm run test:config
+退出码：0
+输出：
+> notebridge@0.1.0 test:config
+> vitest run tests/config
+
+ RUN  v5.1.1 <repo-root>
+
+ ✓ tests/config/config.test.ts (9 tests) 17ms
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  15:31:51
+   Duration  640ms (import 38%, transform 30%, worker 17%, tests 15%)
+
+[4] npm run smoke
+退出码：0
+输出：
+> notebridge@0.1.0 smoke
+> node scripts/smoke.mjs
+
+[PASS] 基线文件检查 - 9 个文件均存在
+[PASS] npm 脚本入口检查 - 10 个脚本均已配置
+[PASS] npm run typecheck - 退出码 0
+[PASS] npm run build - 退出码 0，dist/index.html 已生成
+[PASS] npm run test:config - 退出码 0
+
+Smoke Summary: 5 passed, 0 failed

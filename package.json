@@ -1,0 +1,38 @@
+{
+  "name": "notebridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "vite build",
+    "test:config": "vitest run tests/config",
+    "test:unit": "vitest run tests/unit",
+    "test:service": "vitest run tests/service",
+    "test:contract": "vitest run tests/contract",
+    "test:e2e:mock": "vitest run tests/e2e",
+    "test:browser": "playwright test tests/browser",
+    "test:nonfunc": "vitest run tests/nonfunc",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "smplr": "^1.2.0",
+    "tonal": "^6.0.0",
+    "tone": "^15.1.22",
+    "vexflow": "^5.9.0",
+    "zustand": "^5.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
+  }
+}
