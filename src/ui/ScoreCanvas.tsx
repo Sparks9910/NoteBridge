@@ -8,6 +8,7 @@ import {
   resolveScoreForView,
   useScoreStore,
 } from '../application/score-store.ts';
+import { useWorkspaceStore } from '../application/workspace-store.ts';
 import { CursorOverlayController } from '../rendering/cursor-overlay.ts';
 import { renderJianpu } from '../rendering/jianpu-renderer.ts';
 import {
@@ -27,6 +28,7 @@ export function ScoreCanvas() {
   const measureStatuses = useScoreStore((s) => s.measureStatuses);
   const cursor = useInputStore((s) => s.cursor);
   const playbackState = usePlaybackStore((s) => s.playbackState);
+  const workMode = useWorkspaceStore((s) => s.workMode);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -209,6 +211,7 @@ export function ScoreCanvas() {
   }, [layout, doc.measures, cursor.measureIndex, cursor.noteIndex]);
 
   const showEditCursor =
+    workMode === 'studio' &&
     playbackState !== 'PLAYING' &&
     playbackState !== 'PAUSED' &&
     editCursorPos !== null;
@@ -244,12 +247,13 @@ export function ScoreCanvas() {
                 const status = measureStatuses[mLayout.measureIndex];
                 const validity = status?.state ?? mLayout.validity;
                 const isSelectedMeasure =
+                  workMode === 'studio' &&
                   cursor.measureIndex === mLayout.measureIndex;
 
                 return (
                   <div
                     key={mLayout.measureIndex}
-                    className={`nb-measure-box ${isSelectedMeasure ? 'nb-measure-current' : ''} ${validity === 'OVERFLOW' ? 'nb-measure-overflow' : ''}`}
+                    className={`nb-measure-box ${isSelectedMeasure ? 'nb-measure-current' : ''} ${workMode === 'studio' && validity === 'OVERFLOW' ? 'nb-measure-overflow' : ''}`}
                     style={{
                       left: `${mLayout.x}px`,
                       top: `${line.y}px`,
@@ -272,30 +276,34 @@ export function ScoreCanvas() {
                         {mLayout.measureIndex + 1} ▶
                       </button>
 
-                      <button
-                        type="button"
-                        className="nb-measure-select-btn"
-                        data-testid={`measure-select-${mLayout.measureIndex}`}
-                        title={`定位光标到第 ${mLayout.measureIndex + 1} 小节`}
-                        onClick={() => handleSelectMeasure(mLayout.measureIndex)}
-                      >
-                        定位
-                      </button>
+                      {workMode === 'studio' && (
+                        <>
+                          <button
+                            type="button"
+                            className="nb-measure-select-btn"
+                            data-testid={`measure-select-${mLayout.measureIndex}`}
+                            title={`定位光标到第 ${mLayout.measureIndex + 1} 小节`}
+                            onClick={() => handleSelectMeasure(mLayout.measureIndex)}
+                          >
+                            定位
+                          </button>
 
-                      <span
-                        className={`nb-measure-badge nb-validity-${validity.toLowerCase()}`}
-                        data-testid={`measure-status-${mLayout.measureIndex}`}
-                        data-validity={validity}
-                      >
-                        {validity === 'EMPTY' && '空小节'}
-                        {validity === 'UNDERFLOW' &&
-                          status &&
-                          `缺 ${formatBeats(status.remainingTicks)} 拍`}
-                        {validity === 'VALID' && '满拍'}
-                        {validity === 'OVERFLOW' &&
-                          status &&
-                          `超拍 +${formatBeats(status.overflowTicks)} 拍`}
-                      </span>
+                          <span
+                            className={`nb-measure-badge nb-validity-${validity.toLowerCase()}`}
+                            data-testid={`measure-status-${mLayout.measureIndex}`}
+                            data-validity={validity}
+                          >
+                            {validity === 'EMPTY' && '空小节'}
+                            {validity === 'UNDERFLOW' &&
+                              status &&
+                              `缺 ${formatBeats(status.remainingTicks)} 拍`}
+                            {validity === 'VALID' && '满拍'}
+                            {validity === 'OVERFLOW' &&
+                              status &&
+                              `超拍 +${formatBeats(status.overflowTicks)} 拍`}
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                 );

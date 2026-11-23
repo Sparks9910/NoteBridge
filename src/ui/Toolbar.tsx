@@ -1,5 +1,6 @@
-import type { ChangeEvent } from 'react';
+import { type ChangeEvent, useState } from 'react';
 import { inputStore } from '../application/input-store.ts';
+import { libraryStore } from '../application/library-store.ts';
 import {
   playbackController,
   usePlaybackStore,
@@ -10,12 +11,18 @@ import {
   TIME_SIGNATURE_OPTIONS,
   useScoreStore,
 } from '../application/score-store.ts';
+import {
+  useWorkspaceStore,
+  workspaceStore,
+} from '../application/workspace-store.ts';
 import type {
   DocumentState,
   KeySignature,
   TimeSignature,
   ViewMode,
 } from '../domain/types.ts';
+import { ExportModal } from './ExportModal.tsx';
+import { TransposeModal } from './TransposeModal.tsx';
 
 const SAVE_STATUS_LABELS: Record<DocumentState, string> = {
   CLEAN: '已保存',
@@ -47,7 +54,37 @@ export function Toolbar() {
   const lastError = useScoreStore((s) => s.lastError);
 
   const playbackState = usePlaybackStore((s) => s.playbackState);
+  const workMode = useWorkspaceStore((s) => s.workMode);
   const isLocked = playbackState !== 'IDLE' && playbackState !== 'ERROR';
+
+  const [isTransposeOpen, setIsTransposeOpen] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
+
+  const handleOpenLibrary = () => {
+    if (isLocked) {
+      return;
+    }
+    const state = scoreStore.getState();
+    const hasNotes = state.document.measures.some((m) => m.notes.length > 0);
+    if (hasNotes || state.lastSavedAtEpochMs !== null) {
+      void libraryStore
+        .getState()
+        .syncScoreToLibrary(
+          state.document,
+          workspaceStore.getState().activeMeta
+        );
+    }
+    workspaceStore.getState().setActivePage('library');
+  };
+
+  const handleSaveNow = () => {
+    const res = scoreStore.getState().saveNow();
+    if (res.ok) {
+      void libraryStore
+        .getState()
+        .syncScoreToLibrary(res.value, workspaceStore.getState().activeMeta);
+    }
+  };
 
   const handleTitleChange = (e: ChangeEvent<HTMLInputElement>) => {
     scoreStore.getState().setTitle(e.target.value);
@@ -121,6 +158,16 @@ export function Toolbar() {
           <span className="nb-brand-title">NoteBridge</span>
           <span className="nb-brand-sub">音桥</span>
         </div>
+
+        <button
+          type="button"
+          className="nb-btn"
+          data-testid="btn-open-library"
+          disabled={isLocked}
+          onClick={handleOpenLibrary}
+        >
+          乐谱库
+        </button>
 
         <div className="nb-toolbar-group">
           <input
@@ -221,7 +268,45 @@ export function Toolbar() {
           ))}
         </div>
 
+        <div className="nb-toolbar-group nb-mode-capsule" role="group" aria-label="工作模式">
+          <button
+            type="button"
+            className={`nb-btn nb-capsule-btn ${workMode === 'studio' ? 'nb-btn-active' : ''}`}
+            data-testid="mode-switch-studio"
+            aria-pressed={workMode === 'studio'}
+            onClick={() => workspaceStore.getState().setWorkMode('studio')}
+          >
+            制谱对照
+          </button>
+          <button
+            type="button"
+            className={`nb-btn nb-capsule-btn ${workMode === 'practice' ? 'nb-btn-active' : ''}`}
+            data-testid="mode-switch-practice"
+            aria-pressed={workMode === 'practice'}
+            onClick={() => workspaceStore.getState().setWorkMode('practice')}
+          >
+            练谱模式
+          </button>
+        </div>
+
         <div className="nb-toolbar-group">
+          <button
+            type="button"
+            className="nb-btn"
+            data-testid="btn-open-transpose"
+            disabled={isLocked}
+            onClick={() => setIsTransposeOpen(true)}
+          >
+            一键移调
+          </button>
+          <button
+            type="button"
+            className="nb-btn"
+            data-testid="btn-open-export"
+            onClick={() => setIsExportOpen(true)}
+          >
+            导出
+          </button>
           <button
             type="button"
             className="nb-btn"
@@ -244,7 +329,7 @@ export function Toolbar() {
             type="button"
             className="nb-btn nb-btn-primary"
             data-testid="btn-save"
-            onClick={() => scoreStore.getState().saveNow()}
+            onClick={handleSaveNow}
           >
             保存
           </button>
@@ -270,6 +355,15 @@ export function Toolbar() {
           </button>
         </div>
       )}
+
+      <TransposeModal
+        isOpen={isTransposeOpen}
+        onClose={() => setIsTransposeOpen(false)}
+      />
+      <ExportModal
+        isOpen={isExportOpen}
+        onClose={() => setIsExportOpen(false)}
+      />
     </header>
   );
 }

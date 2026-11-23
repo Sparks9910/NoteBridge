@@ -12,6 +12,10 @@ import {
   transitionDocumentState,
 } from '../domain/state-machines.ts';
 import { resolveScoreNotes, VALID_KEY_SIGNATURES } from '../domain/theory.ts';
+import {
+  transposeScoreDocument,
+  type TransposeOptions,
+} from '../domain/transpose.ts';
 import type {
   Accidental,
   AppError,
@@ -121,6 +125,8 @@ export interface ScoreStoreState {
     afterMeasureIndex: number,
     splitAtNoteIndex?: number
   ) => Result<ScoreDocument>;
+  transposeScore: (options: TransposeOptions) => Result<ScoreDocument>;
+  loadExternalDocument: (doc: ScoreDocument) => Result<ScoreDocument>;
   undo: () => Result<ScoreDocument>;
   redo: () => Result<ScoreDocument>;
   saveNow: () => Result<ScoreDocument>;
@@ -803,6 +809,34 @@ export function createScoreStore(deps?: ScoreStoreDeps): ScoreStoreApi {
           ...current,
           measures: reindexed,
         });
+      },
+
+      transposeScore: (options) => {
+        const current = get().document;
+        const res = transposeScoreDocument(current, options);
+        if (!res.ok) {
+          set({ lastError: res.error });
+          return res;
+        }
+        return commitMutation(res.value);
+      },
+
+      loadExternalDocument: (doc) => {
+        clearAutoSaveTimer();
+        const cloned = cloneDocument(doc);
+        const persistRes = storage.saveScore(cloned);
+        set({
+          document: cloned,
+          documentState: persistRes.ok ? 'CLEAN' : 'SAVE_FAILED',
+          measureStatuses: computeMeasureStatuses(cloned),
+          past: [],
+          future: [],
+          canUndo: false,
+          canRedo: false,
+          lastError: persistRes.ok ? null : persistRes.error,
+          lastSavedAtEpochMs: persistRes.ok ? Math.trunc(now()) : get().lastSavedAtEpochMs,
+        });
+        return { ok: true, value: cloned };
       },
 
       undo: () => {
